@@ -1,3 +1,4 @@
 anthropic
 pyyaml
 python-dotenv
+pydantic
