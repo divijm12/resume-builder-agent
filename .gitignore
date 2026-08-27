@@ -1,0 +1,13 @@
+# Local data / secrets — not shared
+.env
+data/applications.db
+outputs/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# OS
+.DS_Store
