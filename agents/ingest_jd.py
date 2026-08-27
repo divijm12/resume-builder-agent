@@ -19,10 +19,14 @@ load_dotenv()
 DEFAULT_MODEL = "claude-haiku-4-5"
 
 SYSTEM_PROMPT = (
-    "You extract structured fields from a job description. Only use information "
-    "explicitly present in the JD text -- never infer or invent a company name, "
-    "skill, or responsibility that isn't stated. Leave a field empty if the JD "
-    "doesn't specify it."
+    "You extract structured fields from a job description. For company, skills, and "
+    "responsibilities: only use information explicitly present in the JD text -- never "
+    "invent one that isn't stated. For seniority: you may derive it from clear "
+    "conventional signals in the title or text even if the word itself never appears "
+    "-- e.g. 'New College Grad' or 'New Grad' means entry-level, 'Senior' means senior, "
+    "'Staff'/'Principal' means staff/principal, 'Intern' means internship, "
+    "'Manager'/'Director' means management. Only leave seniority empty if the text truly "
+    "gives no such signal."
 )
 
 
