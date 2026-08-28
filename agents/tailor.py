@@ -378,6 +378,14 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
     # from, instead of the model's own pre-validation claim (see resolve_bullets;
     # the model's claim can describe an edit that gets reverted two lines later).
     reworded_by_parent: dict = {}
+    # parent display names with at least one reword ATTEMPT that got reverted --
+    # used below to catch the model narrating that attempt in diff_summary even
+    # when it obeys the "no ids" rule (e.g. "reworded the GeoVerify bullet to
+    # emphasize X" -- true it tried, false that it survived). Prompt-only
+    # enforcement of "don't narrate this" didn't hold in production even after
+    # the id-specific fix, the same lesson as _has_appended_clause: catch the
+    # shape in code, don't just ask nicely.
+    reverted_parents: set = set()
 
     def resolve_bullets(selected_bullets, valid_ids_for_parent, parent_label):
         resolved = []
@@ -405,6 +413,7 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
                     f"Reworded text for bullet '{sb['id']}' introduced a number not in "
                     f"the original -- reverted to original text."
                 )
+                reverted_parents.add(parent_label)
                 resolved.append({"id": sb["id"], "text": original})
             elif _has_appended_clause(original, new_text):
                 warnings.append(
@@ -412,6 +421,7 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
                     f"style clause onto the end instead of actually rewording -- reverted "
                     f"to original text."
                 )
+                reverted_parents.add(parent_label)
                 resolved.append({"id": sb["id"], "text": original})
             elif dropped_terms:
                 warnings.append(
@@ -419,6 +429,7 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
                     f"technology/vendor term(s) {dropped_terms} present in the original -- "
                     f"reverted to original text."
                 )
+                reverted_parents.add(parent_label)
                 resolved.append({"id": sb["id"], "text": original})
             elif added_terms:
                 warnings.append(
@@ -426,6 +437,7 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
                     f"technology/skill term(s) {added_terms} not present (or expanded) in "
                     f"the original -- reverted to original text."
                 )
+                reverted_parents.add(parent_label)
                 resolved.append({"id": sb["id"], "text": original})
             else:
                 if new_text != original:
@@ -544,6 +556,43 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
             cleaned_model_diff_summary.append(cleaned)
     else:
         cleaned_model_diff_summary = list(plan["diff_summary"])
+
+    # Second backstop, for the substantive rule ("do NOT describe a specific
+    # bullet-wording change") rather than just the id-syntax rule above.
+    # Verified in production that a model can obey "don't use ids" while still
+    # violating the actual rule -- e.g. "reworded the GeoVerify bullet to
+    # emphasize data validation..." names no id, but still claims a specific
+    # reword happened, and that exact bullet had been reverted by the
+    # dropped-terms guardrail two lines earlier. Prompt-only enforcement of
+    # this didn't hold even after the narrower id-only fix, so: any line that
+    # both (a) names a project/company that had a reword attempt reverted and
+    # (b) uses a reword-claiming verb ("reworded", "rewrote", "rewriting") is
+    # dropped -- deliberately narrow verb list so this doesn't also eat
+    # legitimate selection/ordering rationale that happens to mention the same
+    # project name (e.g. "selected GeoVerify to emphasize backend work" is
+    # fine and should survive; only an explicit reword claim is the target).
+    if reverted_parents:
+        # Match on significant words from the parent name, not the full string --
+        # a project's full label ("GeoVerify -- Data Integration and Verification
+        # Platform") rarely appears verbatim in a diff_summary line; the model
+        # naturally refers to it by its short name ("GeoVerify") instead.
+        parent_words = {
+            (p, word) for p in reverted_parents for word in re.findall(r"\w{4,}", p)
+        }
+        reword_verb_re = re.compile(r"\breword|\brewrot|\brewrit", re.IGNORECASE)
+        filtered = []
+        for line in cleaned_model_diff_summary:
+            line_lower = line.lower()
+            flagged_parent = next((p for p, word in parent_words if word.lower() in line_lower), None)
+            if flagged_parent and reword_verb_re.search(line):
+                warnings.append(
+                    f"diff_summary line claimed a specific bullet-wording change in "
+                    f"{flagged_parent!r}, which had a reword attempt reverted this pass "
+                    f"-- dropped from the user-facing summary rather than shown: {line!r}"
+                )
+                continue
+            filtered.append(line)
+        cleaned_model_diff_summary = filtered
 
     # Code-generated, ground-truth reword lines -- built only from bullets that
     # actually survived every guardrail above, unlike the model's own diff_summary
