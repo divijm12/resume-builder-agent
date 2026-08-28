@@ -12,6 +12,18 @@ diff_summary is the model's own narrative (plain language, no internal ids)
 truth and guardrail actions (references master_resume.yaml bullet ids like
 "b_004", raw rejection messages) -- an audit trail, not written for
 end-user display; a UI should hide/collapse it rather than show it inline.
+
+Two modes (mode="aggressive"|"honest", see MODES), same no-fabrication
+guarantee underneath both. "aggressive" (default) selects/reorders/relabels
+AND rewords bullets -- the original, heavily tested behavior. "honest" only
+selects/reorders/relabels; bullet text is locked to the master resume's
+original wording in code (not just prompted) so that guarantee can't drift.
+Naming follows Tsenta's (a real product in this space) client-side copy:
+"Honest: reorders and highlights"; "Aggressive: rewrites and tailors the
+content" -- neither mode ever fabricates, per that product's own AI
+disclosure ("applications use only true facts from the resume you
+uploaded"); "aggressive" there means reword intensity, not license to invent.
+
 Rescores the tailored resume with score.py's own scoring function (same
 recruiter-persona prompt) so the impact of tailoring is visible, not assumed
 -- this means every run makes two model calls, not one.
@@ -54,7 +66,17 @@ load_dotenv()
 
 DEFAULT_MODEL = "claude-haiku-4-5"
 
-SYSTEM_PROMPT = (
+# Two modes, same no-fabrication guarantee underneath both -- this mirrors
+# how Tsenta (a real product in this space) names theirs: "Honest" only
+# reorders/highlights/relabels, never touches bullet text; "Aggressive"
+# additionally rewords bullets, still bound by every guardrail below. Honest
+# mode's "never touches bullet text" half of that guarantee is enforced in
+# code (see resolve_bullets), not just prompted -- consistent with this
+# project's whole approach of not trusting prompt-only behavior for anything
+# structurally checkable.
+MODES = ("honest", "aggressive")
+
+_SHARED_CORE_PROMPT = (
     "You tailor a resume to a specific job by selecting, reordering, and lightly "
     "rewording bullets that already exist in the candidate's master resume -- you "
     "may NEVER invent a bullet, metric, skill, or claim that isn't already there. "
@@ -118,16 +140,21 @@ SYSTEM_PROMPT = (
     "back it up; that's the skill-level equivalent of a light bullet reword, "
     "not fabrication. It would NOT be fine to relabel 'SQL (PostgreSQL, "
     "MySQL)' as 'NoSQL databases' -- that's a different, unsupported "
-    "capability, not a rename of the same one.\n\n"
-    "Finally, self-review your own selection like an ATS filter and a hiring "
-    "manager skimming 200 resumes in one sitting: which of your selected "
-    "bullets would get skipped -- too generic, too vague, buried lede, no "
-    "keyword signal? For each one you flag, actually change that bullet's text "
-    "field so it would stop the scroll instead of blending in -- don't leave "
-    "the text field unchanged and only describe the fix in ats_scan_notes. Only "
-    "describe an edit in ats_scan_notes/diff_summary if you actually changed "
-    "that bullet's text field to something different from the original; if you "
-    "kept it verbatim, don't claim you reworded it.\n\n"
+    "capability, not a rename of the same one."
+)
+
+_AGGRESSIVE_MODE_PROMPT = (
+    "\n\nYou are running in AGGRESSIVE mode: reword bullet text, not just "
+    "select/reorder/relabel. Self-review your own selection like an ATS "
+    "filter and a hiring manager skimming 200 resumes in one sitting: which "
+    "of your selected bullets would get skipped -- too generic, too vague, "
+    "buried lede, no keyword signal? For each one you flag, actually change "
+    "that bullet's text field so it would stop the scroll instead of "
+    "blending in -- don't leave the text field unchanged and only describe "
+    "the fix in ats_scan_notes. Only describe an edit in "
+    "ats_scan_notes/diff_summary if you actually changed that bullet's text "
+    "field to something different from the original; if you kept it "
+    "verbatim, don't claim you reworded it.\n\n"
     "Don't over-correct into inaction. All of the constraints above are about "
     "*what a change must look like* if you make one -- they are not a reason "
     "to avoid making changes. A resume that comes out identical to the master "
@@ -142,6 +169,31 @@ SYSTEM_PROMPT = (
     "reworded without breaking a rule, not as a default posture for the whole "
     "resume."
 )
+
+_HONEST_MODE_PROMPT = (
+    "\n\nYou are running in HONEST mode: you may ONLY select which bullets "
+    "and projects to include and their order, and relabel skills "
+    "(display_as) to JD-matching terminology when it's genuinely the same "
+    "underlying capability. You do NOT reword bullet text in this mode -- "
+    "whatever you put in a bullet's 'text' field is discarded and the "
+    "original master resume wording is used instead, so don't spend effort "
+    "trying to reword bullets; just repeat each selected bullet's original "
+    "text back in the 'text' field unchanged. Address reword_opportunities "
+    "and top_missing_keywords/red_flags only through selection, ordering, "
+    "and skill relabeling -- if one genuinely can't be surfaced that way, "
+    "put it in unaddressed_reword_opportunities/unaddressed_hard_gaps/"
+    "unaddressed_red_flags rather than pretending a bullet reword will fix "
+    "it. Still self-review as an ATS/hiring-manager would, but express that "
+    "through what you select and how you order it, not through rewriting."
+)
+
+
+def _system_prompt(mode: str) -> str:
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+    addendum = _AGGRESSIVE_MODE_PROMPT if mode == "aggressive" else _HONEST_MODE_PROMPT
+    return _SHARED_CORE_PROMPT + addendum
+
 
 NUMERIC_TOKEN_RE = re.compile(r"\d[\d,]*\.?\d*%?\+?x?", re.IGNORECASE)
 
@@ -253,14 +305,21 @@ def _bullet_lookup(master_resume: dict) -> dict:
     return lookup
 
 
-def validate_and_build(plan: dict, master_resume: dict) -> dict:
+def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive") -> dict:
     """Enforce the no-fabrication hard rule and assemble the final tailored resume.
 
     An unknown bullet/skill/experience id is dropped; a reworded bullet that
     introduces a number not present in the original is reverted to the
-    original text. Every rejection is recorded in diff_summary so it's visible
-    in review, not silently swallowed.
+    original text. Every rejection is recorded in validation_log so it's
+    visible in review, not silently swallowed.
+
+    In "honest" mode, bullet text is locked to the master resume's original
+    wording in code -- not just prompted -- so that guarantee holds
+    regardless of what the model returns in a bullet's 'text' field.
     """
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+
     bullet_text = _bullet_lookup(master_resume)
     valid_skills = {s["name"] for s in master_resume.get("skills", [])}
     known_terms = _known_terms(master_resume)
@@ -277,7 +336,7 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
                 warnings.append(f"Dropped unknown bullet id '{sb['id']}' -- not in master resume.")
                 continue
             original = bullet_text[sb["id"]]
-            new_text = sb["text"]
+            new_text = original if mode == "honest" else sb["text"]
             # Same global vocabulary (all skill names + all projects' tech) protects
             # against both directions, for every bullet -- experience included, not
             # just project bullets. A term only "counts" as dropped if it's an exact
@@ -423,8 +482,19 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
     }
 
 
-def tailor_resume(jd_parsed: dict, score: dict, master_resume: dict, model: str = DEFAULT_MODEL) -> dict:
-    """Produce a tailored resume from the JD, score output, and master resume."""
+def tailor_resume(
+    jd_parsed: dict, score: dict, master_resume: dict, model: str = DEFAULT_MODEL, mode: str = "aggressive"
+) -> dict:
+    """Produce a tailored resume from the JD, score output, and master resume.
+
+    mode: "aggressive" (default) rewords bullets in addition to selecting,
+    reordering, and relabeling skills -- this is the original, heavily
+    tested behavior. "honest" only selects/reorders/relabels; bullet text is
+    never touched (enforced in validate_and_build, not just prompted).
+    """
+    if mode not in MODES:
+        raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
+
     client = anthropic.Anthropic()
     user_content = (
         f"Job description (parsed):\n{json.dumps(jd_parsed, indent=2)}\n\n"
@@ -435,12 +505,12 @@ def tailor_resume(jd_parsed: dict, score: dict, master_resume: dict, model: str 
     response = client.messages.parse(
         model=model,
         max_tokens=8000,
-        system=SYSTEM_PROMPT,
+        system=_system_prompt(mode),
         messages=[{"role": "user", "content": user_content}],
         output_format=TailoringPlan,
     )
     plan = response.parsed_output.model_dump()
-    result = validate_and_build(plan, master_resume)
+    result = validate_and_build(plan, master_resume, mode=mode)
 
     # Rescore the tailored resume with score.py's own scoring logic so the impact
     # of tailoring (or lack of it) is measured, not assumed.
@@ -457,13 +527,17 @@ def main():
     parser.add_argument("--score-json", required=True, help="Path to score.json (output of score.py)")
     parser.add_argument("--resume", type=Path, default=Path("data/master_resume.yaml"), help="Path to master_resume.yaml")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model to use (default: {DEFAULT_MODEL})")
+    parser.add_argument(
+        "--mode", choices=MODES, default="aggressive",
+        help="'aggressive' (default) rewords bullets; 'honest' only selects/reorders/relabels, never touches bullet text",
+    )
     args = parser.parse_args()
 
     jd_parsed = json.loads(Path(args.jd_json).read_text())
     score = json.loads(Path(args.score_json).read_text())
     master_resume = yaml.safe_load(args.resume.read_text())
 
-    result = tailor_resume(jd_parsed, score, master_resume, model=args.model)
+    result = tailor_resume(jd_parsed, score, master_resume, model=args.model, mode=args.mode)
     print(json.dumps(result, indent=2))
 
 

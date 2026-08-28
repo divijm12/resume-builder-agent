@@ -30,7 +30,7 @@ import yaml
 
 from ingest_jd import ingest_jd
 from score import score_jd
-from tailor import tailor_resume
+from tailor import MODES, tailor_resume
 from render import _slug, _split_name, find_one_page_layout, render_docx, render_pdf
 
 DEFAULT_MODEL = "claude-haiku-4-5"
@@ -47,6 +47,7 @@ def log_application(
     docx_path: Path,
     diff_summary: list,
     tailor_result: dict,
+    mode: str = "aggressive",
 ) -> int:
     """Insert one applications row + one resume_versions row. Called once per
     apply.py run, immediately after rendering -- never after sending, since
@@ -60,10 +61,10 @@ def log_application(
         cur = conn.execute(
             """
             INSERT INTO applications
-                (company, role_title, jd_raw, jd_parsed_json, match_score, resume_variant_path, tailor_result_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+                (company, role_title, jd_raw, jd_parsed_json, match_score, resume_variant_path, tailor_result_json, mode)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (company, role_title, jd_raw, json.dumps(jd_parsed), match_score, str(docx_path), json.dumps(tailor_result)),
+            (company, role_title, jd_raw, json.dumps(jd_parsed), match_score, str(docx_path), json.dumps(tailor_result), mode),
         )
         application_id = cur.lastrowid
         conn.execute(
@@ -85,6 +86,7 @@ def run_pipeline(
     company_override: str = None,
     role_override: str = None,
     model: str = DEFAULT_MODEL,
+    mode: str = "aggressive",
     outputs_dir: Path = Path("outputs"),
     db_path: Path = Path("data/applications.db"),
     resume_path: Path = Path("data/master_resume.yaml"),
@@ -107,7 +109,7 @@ def run_pipeline(
     report("scoring")
     score = score_jd(jd_parsed, master_resume, model=model)
     report("tailoring")
-    tailored = tailor_resume(jd_parsed, score, master_resume, model=model)
+    tailored = tailor_resume(jd_parsed, score, master_resume, model=model, mode=mode)
 
     company = company_override or jd_parsed.get("company") or "UnknownCompany"
     role = role_override or jd_parsed.get("role") or "UnknownRole"
@@ -139,6 +141,7 @@ def run_pipeline(
         docx_path=docx_path,
         diff_summary=tailored["diff_summary"],
         tailor_result=tailored,
+        mode=mode,
     )
 
     return {
@@ -163,6 +166,10 @@ def main():
     parser.add_argument("--company", help="Override the company name (else auto-extracted from the JD)")
     parser.add_argument("--role", help="Override the role title (else auto-extracted from the JD)")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model to use (default: {DEFAULT_MODEL})")
+    parser.add_argument(
+        "--mode", choices=MODES, default="aggressive",
+        help="'aggressive' (default) rewords bullets; 'honest' only selects/reorders/relabels",
+    )
     parser.add_argument("--outputs-dir", type=Path, default=Path("outputs"))
     parser.add_argument("--db", type=Path, default=Path("data/applications.db"))
     parser.add_argument("--resume", type=Path, default=Path("data/master_resume.yaml"))
@@ -175,6 +182,7 @@ def main():
         company_override=args.company,
         role_override=args.role,
         model=args.model,
+        mode=args.mode,
         outputs_dir=args.outputs_dir,
         db_path=args.db,
         resume_path=args.resume,

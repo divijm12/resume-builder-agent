@@ -67,9 +67,10 @@ class CreateJobRequest(BaseModel):
     company: Optional[str] = None
     role: Optional[str] = None
     model: Optional[str] = None
+    mode: Optional[str] = None
 
 
-def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[str], model: str):
+def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[str], model: str, mode: str):
     def report(stage: str):
         with JOBS_LOCK:
             JOBS[job_id]["stage"] = stage
@@ -80,6 +81,7 @@ def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[s
             company_override=company,
             role_override=role,
             model=model,
+            mode=mode,
             outputs_dir=OUTPUTS_DIR,
             db_path=DB_PATH,
             resume_path=RESUME_PATH,
@@ -100,7 +102,8 @@ def create_job(body: CreateJobRequest, background_tasks: BackgroundTasks):
     with JOBS_LOCK:
         JOBS[job_id] = {"status": "running", "stage": "starting", "application_id": None, "error": None}
     background_tasks.add_task(
-        _run_job, job_id, body.jd_text, body.company, body.role, body.model or apply.DEFAULT_MODEL
+        _run_job, job_id, body.jd_text, body.company, body.role,
+        body.model or apply.DEFAULT_MODEL, body.mode or "aggressive",
     )
     return {"job_id": job_id}
 
@@ -123,7 +126,7 @@ def list_applications():
     conn = _get_db()
     try:
         rows = conn.execute(
-            "SELECT id, created_at, company, role_title, match_score, status "
+            "SELECT id, created_at, company, role_title, match_score, status, mode "
             "FROM applications ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]

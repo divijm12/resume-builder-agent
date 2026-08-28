@@ -51,10 +51,10 @@ outputs/
 - When in doubt about a scope decision, default to the more conservative/manual option and ask rather than automating further.
 
 ## Commands
-- `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values.
+- `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values, `--mode honest|aggressive` to control tailoring intensity (default `aggressive`; see ARCHITECTURE.md Stage 2 — neither mode fabricates).
 - `python agents/ingest_jd.py --file path/to/jd.txt` — Stage 0 alone
 - `python agents/score.py --jd-json path/to/jd_parsed.json` — Stage 1 alone
-- `python agents/tailor.py --jd-json ... --score-json ...` — Stage 2 alone
+- `python agents/tailor.py --jd-json ... --score-json ... [--mode honest|aggressive]` — Stage 2 alone
 - `python render/render.py --tailored-json ... --company ... --role ...` — Stage 3 alone
 - `cd review/backend && uvicorn main:app --reload --port 8000` — start the review API (needs `.env` at repo root)
 - `cd review/frontend && npm run dev` — start the review web UI (http://localhost:5173), needs the backend running

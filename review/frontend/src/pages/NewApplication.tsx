@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createJob } from "../api";
+import { createJob, TAILORING_MODES } from "../api";
 import { useJobPolling } from "../hooks/useJobPolling";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -23,6 +23,7 @@ export default function NewApplication() {
   const [company, setCompany] = useState("");
   const [role, setRole] = useState("");
   const [model, setModel] = useState(MODELS[0].value);
+  const [mode, setMode] = useState<"honest" | "aggressive">("aggressive");
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
 
@@ -45,6 +46,7 @@ export default function NewApplication() {
         company: company || undefined,
         role: role || undefined,
         model,
+        mode,
       });
       setJobId(job_id);
     } catch (err) {
@@ -72,6 +74,32 @@ export default function NewApplication() {
             className="w-full rounded-md border border-slate-300 p-3 font-mono text-sm focus:border-slate-500 focus:outline-none disabled:bg-slate-100"
             placeholder="Paste the full job posting text here…"
           />
+        </div>
+
+        <div>
+          <label className="mb-1 block text-sm font-medium">Tailoring mode</label>
+          <div className="grid grid-cols-2 gap-3">
+            {TAILORING_MODES.map((m) => (
+              <button
+                key={m.value}
+                type="button"
+                disabled={submitting}
+                onClick={() => setMode(m.value)}
+                className={`rounded-md border p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
+                  mode === m.value
+                    ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900"
+                    : "border-slate-300 hover:border-slate-400"
+                }`}
+              >
+                <div className="font-medium">{m.label}</div>
+                <div className="mt-0.5 text-xs text-slate-500">{m.description}</div>
+              </button>
+            ))}
+          </div>
+          <p className="mt-1 text-xs text-slate-400">
+            Neither mode ever invents skills, numbers, or experience — "Aggressive" means more
+            rewriting, not less honesty.
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-4">

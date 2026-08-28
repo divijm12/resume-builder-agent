@@ -19,6 +19,7 @@ export interface ApplicationSummary {
   role_title: string;
   match_score: number | null;
   status: string;
+  mode: "honest" | "aggressive";
 }
 
 export interface ScoreResult {
@@ -88,11 +89,25 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
+export const TAILORING_MODES = [
+  {
+    value: "honest",
+    label: "Honest",
+    description: "Reorders and highlights the experience most relevant to each job.",
+  },
+  {
+    value: "aggressive",
+    label: "Aggressive",
+    description: "Rewrites and tailors the content to match each job description.",
+  },
+] as const;
+
 export function createJob(params: {
   jd_text: string;
   company?: string;
   role?: string;
   model?: string;
+  mode?: string;
 }): Promise<{ job_id: string }> {
   return request("/api/jobs", { method: "POST", body: JSON.stringify(params) });
 }

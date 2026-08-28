@@ -302,4 +302,44 @@ class of bug for free, before spending a single API call testing it live.
 
 ---
 
+## 8. Honest vs. Aggressive tailoring modes -- and a lesson in checking a premise
+
+This one's worth writing down because of *how* it got resolved, not just
+what got built. The ask was for an "aggressive" mode that could invent
+numbers and technologies to inflate the match score, justified by "I've
+seen other tools offer this — if they can, why can't you." That's worth
+pausing on: a feature request justified by a competitor's behavior is only
+as good as whether the competitor actually behaves that way. So before
+building anything, the competitor (Tsenta, a real YC-backed company in
+this exact space) got looked up directly — their own AI disclosure page
+says applications use "only true facts from the résumé you uploaded," and
+their client-side copy for "Aggressive" mode literally says "Rewrites and
+tailors the content to match each job description" — nothing about
+inventing facts. The premise didn't hold up. **Always check whether the
+example you're being pointed to actually does what it's claimed to do,
+especially before using it to justify skipping a safety constraint** — the
+research took two web searches and settled the entire question.
+
+What got built instead mirrors what Tsenta actually does: two modes, same
+no-fabrication guarantee, differing only in *how much* rewording happens.
+"Honest" only selects, reorders, and relabels skills — bullet text is
+never touched. "Aggressive" (the previous default, unchanged) additionally
+rewords bullet text, still bound by every guardrail already in this file.
+
+The implementation choice here is the same lesson from section 2, applied
+again: Honest mode's "bullet text never changes" guarantee is enforced in
+*code*, not prompted. `validate_and_build(..., mode="honest")` sets
+`new_text = original` unconditionally before any of the guardrail checks
+even run — so there's no way for a model that ignores its instructions to
+leak a reworded bullet through in Honest mode, because the code never even
+looks at what the model returned for that field. Contrast that with skill
+*relabeling* (`display_as`), which stays prompt-governed in both modes,
+same as before — a one-word/phrase substitution anchored to a real skill
+is low enough risk that prompting is an acceptable line of defense there,
+the same tradeoff this project has made consistently: code-enforce what's
+structurally checkable and high-risk, prompt-govern what's genuinely a
+judgment call.
+
+---
+
 *(more entries added as this project continues)*

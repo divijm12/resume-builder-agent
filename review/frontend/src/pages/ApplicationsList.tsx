@@ -50,6 +50,7 @@ export default function ApplicationsList() {
               <th className="px-4 py-2">Role</th>
               <th className="px-4 py-2">Date</th>
               <th className="px-4 py-2">Score</th>
+              <th className="px-4 py-2">Mode</th>
               <th className="px-4 py-2">Status</th>
             </tr>
           </thead>
@@ -66,6 +67,7 @@ export default function ApplicationsList() {
                 <td className="px-4 py-3 text-slate-600">
                   {app.match_score !== null ? app.match_score.toFixed(0) : "—"}
                 </td>
+                <td className="px-4 py-3 text-slate-500 capitalize">{app.mode}</td>
                 <td className="px-4 py-3">
                   <span
                     className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[app.status] ?? "bg-slate-100 text-slate-700"}`}

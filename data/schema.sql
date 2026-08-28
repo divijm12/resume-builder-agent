@@ -19,6 +19,11 @@ CREATE TABLE applications (
   -- is an internal audit trail (references master_resume.yaml bullet ids) --
   -- a UI should hide/collapse it, not show it inline.
   tailor_result_json TEXT,
+  -- Tailoring mode used for this application -- see agents/tailor.py MODES.
+  -- "aggressive": selects/reorders/relabels AND rewords bullets (default).
+  -- "honest": only selects/reorders/relabels, bullet text never touched.
+  -- Neither mode fabricates; this only affects reword intensity.
+  mode TEXT NOT NULL DEFAULT 'aggressive' CHECK (mode IN ('honest','aggressive')),
   status TEXT NOT NULL DEFAULT 'drafted'
     CHECK (status IN ('drafted','applied','outreach_sent','interview','rejected','ghosted','offer')),
   contact_name TEXT,
