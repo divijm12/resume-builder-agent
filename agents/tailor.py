@@ -9,17 +9,24 @@ persistence happens one layer up.
 Hard rule (CLAUDE.md): may only select, reorder, and lightly reword bullets
 that already exist in master_resume.yaml -- never invent a bullet, metric, or
 skill. This is enforced here, not just prompted: every selected id is checked
-against the master resume, unknown skills are dropped, and reworded bullet
-text is rejected (reverted to the original) if it introduces a number that
-wasn't in the source bullet, or drops a named technology/vendor term (from
-that project's `tech` list) that was present in the original bullet.
+against the master resume, every selected skill must resolve to a real
+master_skill_name (a JD-matching display_as relabel of that same skill is
+allowed -- e.g. "LLM agent development" shown as "Agentic AI solutions" --
+but the underlying skill must be real), and reworded bullet text is rejected
+(reverted to the original) if it introduces a number that wasn't in the
+source bullet, drops a named technology/vendor term (from that project's
+`tech` list) that was present in the original bullet, or adds a technology/
+skill name from anywhere in the master resume's vocabulary that wasn't
+already in that specific bullet -- unless it's a textual expansion of
+something already there (e.g. "Claude API" -> "Anthropic Claude API" is
+fine; "Python" appearing out of nowhere is not).
 """
 
 import argparse
 import json
 import re
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import anthropic
 import yaml
@@ -75,6 +82,16 @@ SYSTEM_PROMPT = (
     "terminology; if the resume has no real coverage for it, do not fake "
     "coverage -- list that keyword/red flag back out in unaddressed_hard_gaps "
     "or unaddressed_red_flags instead of hiding it.\n\n"
+    "Each selected skill must be anchored to a real master_skill_name from the "
+    "master resume -- you cannot invent a skill from nothing. But you MAY set "
+    "display_as to a JD-matching relabel of that same skill when it's "
+    "genuinely the same underlying capability, just named differently -- e.g. "
+    "master_skill_name 'LLM agent development' with display_as 'Agentic AI "
+    "solutions' is fine when the resume's own projects (an agent-based system) "
+    "back it up; that's the skill-level equivalent of a light bullet reword, "
+    "not fabrication. It would NOT be fine to relabel 'SQL (PostgreSQL, "
+    "MySQL)' as 'NoSQL databases' -- that's a different, unsupported "
+    "capability, not a rename of the same one.\n\n"
     "Finally, self-review your own selection like an ATS filter and a hiring "
     "manager skimming 200 resumes in one sitting: which of your selected "
     "bullets would get skipped -- too generic, too vague, buried lede, no "
@@ -83,7 +100,20 @@ SYSTEM_PROMPT = (
     "the text field unchanged and only describe the fix in ats_scan_notes. Only "
     "describe an edit in ats_scan_notes/diff_summary if you actually changed "
     "that bullet's text field to something different from the original; if you "
-    "kept it verbatim, don't claim you reworded it."
+    "kept it verbatim, don't claim you reworded it.\n\n"
+    "Don't over-correct into inaction. All of the constraints above are about "
+    "*what a change must look like* if you make one -- they are not a reason "
+    "to avoid making changes. A resume that comes out identical to the master "
+    "resume, especially against a JD with a low match score or several "
+    "top_missing_keywords/red_flags, is a sign you were too cautious, not "
+    "appropriately careful -- score.json's reword_opportunities exist "
+    "precisely because there ARE safe, grounded ways to better surface what's "
+    "already there. Skill relabeling (display_as) and bullet/project selection "
+    "and ordering are always safe -- use them assertively. Reach for bullet "
+    "rewording too wherever it can honestly follow the rules above; only fall "
+    "back to a bullet's original text when THAT bullet specifically can't be "
+    "reworded without breaking a rule, not as a default posture for the whole "
+    "resume."
 )
 
 NUMERIC_TOKEN_RE = re.compile(r"\d[\d,]*\.?\d*%?\+?x?", re.IGNORECASE)
@@ -104,8 +134,13 @@ class SelectedProject(BaseModel):
     bullets: List[SelectedBullet]
 
 
+class SelectedSkill(BaseModel):
+    master_skill_name: str
+    display_as: Optional[str] = None
+
+
 class TailoringPlan(BaseModel):
-    selected_skills: List[str]
+    selected_skills: List[SelectedSkill]
     experience: List[SelectedExperience]
     projects: List[SelectedProject]
     diff_summary: List[str]
@@ -116,6 +151,32 @@ class TailoringPlan(BaseModel):
 
 def _numeric_tokens(text: str) -> set:
     return set(NUMERIC_TOKEN_RE.findall(text))
+
+
+def _contains_term(text: str, term: str) -> bool:
+    """Whole-word/phrase, case-insensitive containment check."""
+    prefix = r"\b" if term[0].isalnum() else ""
+    suffix = r"\b" if term[-1].isalnum() else ""
+    return re.search(prefix + re.escape(term) + suffix, text, re.IGNORECASE) is not None
+
+
+def _is_expansion(term: str, original_text: str) -> bool:
+    """True if `term` (new to the bullet) textually extends something already in
+    the original -- e.g. 'Anthropic Claude API' extends an original mention of
+    'Claude API'. False means it's a genuinely new, unsupported addition."""
+    words = re.findall(r"\w{4,}", term.lower())
+    original_lower = original_text.lower()
+    return any(w in original_lower for w in words)
+
+
+def _known_terms(master_resume: dict) -> set:
+    """All skill names and project tech names -- the vocabulary a reworded bullet
+    is allowed to newly mention, and only when it's an expansion of something
+    already in that bullet (see _is_expansion)."""
+    terms = {s["name"] for s in master_resume.get("skills", [])}
+    for proj in master_resume.get("projects", []):
+        terms.update(proj.get("tech", []))
+    return terms
 
 
 def _bullet_lookup(master_resume: dict) -> dict:
@@ -140,6 +201,7 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
     """
     bullet_text = _bullet_lookup(master_resume)
     valid_skills = {s["name"] for s in master_resume.get("skills", [])}
+    known_terms = _known_terms(master_resume)
     exp_by_id = {e["id"]: e for e in master_resume.get("experience", [])}
     proj_by_id = {p["id"]: p for p in master_resume.get("projects", [])}
     master_exp_order = [e["id"] for e in master_resume.get("experience", [])]
@@ -159,6 +221,11 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
                 t for t in protected_terms
                 if t.lower() in original.lower() and t.lower() not in new_text.lower()
             ]
+            added_terms = [
+                t for t in known_terms
+                if _contains_term(new_text, t) and not _contains_term(original, t)
+                and not _is_expansion(t, original)
+            ]
             if _numeric_tokens(new_text) - _numeric_tokens(original):
                 warnings.append(
                     f"Reworded text for bullet '{sb['id']}' introduced a number not in "
@@ -170,6 +237,13 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
                     f"Reworded text for bullet '{sb['id']}' dropped named "
                     f"technology/vendor term(s) {dropped_terms} present in the original -- "
                     f"reverted to original text."
+                )
+                resolved.append({"id": sb["id"], "text": original})
+            elif added_terms:
+                warnings.append(
+                    f"Reworded text for bullet '{sb['id']}' added named "
+                    f"technology/skill term(s) {added_terms} not present (or expanded) in "
+                    f"the original -- reverted to original text."
                 )
                 resolved.append({"id": sb["id"], "text": original})
             else:
@@ -206,9 +280,19 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
         })
     # Projects keep the model's relevance-ranked order (unlike experience, not chronological).
 
-    selected_skills = [s for s in plan["selected_skills"] if s in valid_skills]
-    for s in set(plan["selected_skills"]) - valid_skills:
-        warnings.append(f"Dropped unknown skill '{s}' -- not in master resume.")
+    selected_skills = []
+    relabeled_skills = []
+    for s in plan["selected_skills"]:
+        if s["master_skill_name"] not in valid_skills:
+            warnings.append(
+                f"Dropped unknown skill '{s['master_skill_name']}' -- not in master resume "
+                f"(display_as relabeling only works when master_skill_name is a real skill)."
+            )
+            continue
+        label = s.get("display_as") or s["master_skill_name"]
+        selected_skills.append(label)
+        if label != s["master_skill_name"]:
+            relabeled_skills.append(f"{s['master_skill_name']} -> {label}")
 
     # Ground truth, computed from the actual output -- not the model's self-report.
     # ats_scan_notes/diff_summary above are the model's own rationale and can describe
@@ -217,6 +301,8 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
         warnings.append(f"Bullets with text actually changed from the master resume: {actually_reworded_ids}")
     else:
         warnings.append("No bullet text was changed from the master resume -- all selected bullets kept verbatim.")
+    if relabeled_skills:
+        warnings.append(f"Skills relabeled from their master resume name: {relabeled_skills}")
 
     tailored_resume = {
         "basics": master_resume["basics"],
