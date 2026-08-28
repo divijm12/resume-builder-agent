@@ -5,3 +5,5 @@ pydantic
 python-docx
 reportlab
 pypdf
+fastapi
+uvicorn[standard]

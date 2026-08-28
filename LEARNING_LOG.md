@@ -122,4 +122,113 @@ usually isn't — track the structure.**
 
 ---
 
-*(more entries added as we build the backend and frontend)*
+## 6. Web APIs from first principles (client, server, endpoints, HTTP)
+
+You asked what all of this actually means, so let's build it up from
+scratch using `review/backend/main.py` as the concrete example — every term
+below maps to a real line of code we just wrote and tested.
+
+**Client and server.** Two programs talking to each other over a network.
+The **server** sits and waits, ready to answer questions — that's
+`main.py`, running via `uvicorn` (a program that keeps a Python process
+alive and feeds it incoming network requests). The **client** is whatever
+initiates a question — for us that was literally `curl` on the command
+line simulating what the browser will do later. Neither has to be on a
+different physical computer; right now both are running on your laptop,
+just as separate processes talking over `localhost` (a special address
+that always means "this machine").
+
+**HTTP.** The *protocol* — the agreed-upon format — that clients and
+servers use to talk. Every HTTP interaction is one **request** (from
+client to server) and one **response** (server back to client). A request
+has three important parts: a **method** (what kind of action), a **path**
+(which thing), and optionally a **body** (data attached to the request).
+When you ran `curl -X POST http://127.0.0.1:8000/api/jobs -d @job_body.json`,
+that was one request: method `POST`, path `/api/jobs`, body = the JD text
+as JSON.
+
+**Endpoint.** A server doesn't just accept any request — it only responds
+to the specific method+path combinations it's been programmed to handle.
+Each one is an endpoint. In `main.py`, `@app.post("/api/jobs")` directly
+above `def create_job(...)` *is* the declaration of an endpoint: "if a
+POST request arrives at the path `/api/jobs`, run this function and send
+back whatever it returns." FastAPI's whole job is turning these Python
+function decorators into a real, running network listener — you write
+normal Python functions and FastAPI handles all the HTTP plumbing.
+
+**The methods we used, and why each one:**
+- `GET` — "give me data, don't change anything." `GET /api/applications`
+  (list all), `GET /api/jobs/{job_id}` (check status). Safe to call
+  repeatedly — that's exactly what polling relies on.
+- `POST` — "create a new thing." `POST /api/jobs` creates a new pipeline
+  run and hands back a `job_id` for it.
+- `PATCH` — "update *part* of an existing thing." `PATCH
+  /api/applications/1` with `{"status": "applied"}` changed only the
+  status column, leaving everything else on that row untouched.
+This GET/POST/PATCH convention is called **REST** — it's not enforced by
+any tool, it's just a widely-shared naming convention so that anyone
+reading your API's endpoint list can guess what each one does.
+
+**Request/response bodies are JSON.** JSON (`{"status": "applied"}`) is
+just a text format for structured data — the same shape Python dicts have,
+which is why converting between them (`json.dumps`/`json.loads`, or in
+FastAPI's case, automatically via Pydantic models like
+`CreateJobRequest`) is trivial. This is also why the *entire* tailoring
+result could be stuffed into one `tailor_result_json` database column
+back in section 3/5 — JSON doesn't care how deeply nested or complex the
+data is, it just needs to round-trip through text.
+
+**Status codes.** A 3-digit number at the very front of every response,
+summarizing the outcome before you even look at the body. We saw three:
+`200` (default "it worked"), `404` ("the thing you asked for doesn't
+exist" — we return this explicitly via `raise HTTPException(404, ...)`
+when a job_id or application id isn't found), and `400` ("your request
+itself was invalid" — we saw this exact case when PATCHing an invalid
+status string; the database's own `CHECK` constraint rejected it, and we
+turned that into a proper 400 instead of letting the server crash).
+
+**Why the pipeline can't just run inside the request handler.** A request
+handler function is expected to return quickly — the client is sitting
+there waiting the whole time. Our pipeline takes up to a minute (4
+sequential paid API calls). If `create_job()` just called
+`apply.run_pipeline()` directly and waited, the browser tab would hang
+with zero feedback, and any reasonable timeout would kill the connection
+before it finished. FastAPI's `BackgroundTasks` (`background_tasks.add_task(_run_job, ...)`
+in `create_job()`) is the fix: the endpoint schedules `_run_job` to run
+*after* it has already sent its response, so the client gets `{"job_id":
+"..."}` back in milliseconds while the real work continues unattended.
+
+**Polling, concretely.** Since the client already got its instant
+response and moved on, how does it find out when the slow work actually
+finishes? It asks again. And again. `GET /api/jobs/{job_id}` just reads
+the current value out of the in-memory `JOBS` dict, which `_run_job`
+updates as it goes (`report("scoring")`, `report("tailoring")`, etc. —
+this is the `progress_callback` we wired into `apply.run_pipeline()` in
+section 4/checkpoint 1). The literal bash `for` loop with `sleep 5` I ran
+to test this *is* polling — the React frontend will do the same thing on
+a faster interval, just with a `setInterval` instead of a shell loop, and
+render the result instead of printing it.
+
+**CORS**, one more term you'll see in the code (`CORSMiddleware`): a
+security rule built into every browser that blocks a webpage loaded from
+one address (e.g. `http://localhost:5173`, where the React dev server
+will run) from making requests to a *different* address (`http://localhost:8000`,
+our backend) — unless the server explicitly says "requests from that
+address are allowed." That's all `app.add_middleware(CORSMiddleware,
+allow_origins=["http://localhost:5173", ...])` does. This only matters
+for browser JavaScript; it's why `curl` never had this problem testing
+the backend directly — the CORS check is enforced by browsers, not
+servers, but the server has to opt in on the browser's behalf.
+
+**Backend vs. frontend**, tying it together: the **backend** (`main.py`,
+this checkpoint) owns the logic, the database, and the only code allowed
+to talk to the Anthropic API or the filesystem. The **frontend** (React,
+next checkpoint) is a webpage that owns nothing but presentation — it
+calls the backend's endpoints to do anything real, and just renders
+whatever JSON comes back. This separation is why we could fully test and
+verify the backend with nothing but `curl` — the frontend is purely a
+prettier client than the one we've been using.
+
+---
+
+*(more entries added as we build the frontend)*
