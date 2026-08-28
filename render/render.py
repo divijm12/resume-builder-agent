@@ -254,14 +254,13 @@ def render_docx(tailored_resume: dict, output_path: Path, margin_in: float = 0.4
                 p = doc.add_paragraph()
                 run = p.add_run(edu["honors"])
                 _set_font(run, size=Pt(sizes["small"]))
+                p.paragraph_format.space_after = Pt(sizes["bullet_space_after"])
 
     if tailored_resume.get("certifications"):
         _add_section_heading(doc, "Certifications", sizes)
         for cert in tailored_resume["certifications"]:
-            p = doc.add_paragraph(style="List Bullet")
             year = f" ({cert['year']})" if cert.get("year") else ""
-            run = p.add_run(f"{cert.get('name', '')}{year}")
-            _set_font(run, size=Pt(sizes["body"]))
+            _add_bullet(doc, f"{cert.get('name', '')}{year}", sizes)
 
     if tailored_resume.get("skills"):
         _add_section_heading(doc, "Skills", sizes)
@@ -325,7 +324,7 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
         "bold_row": ParagraphStyle("bold_row", fontName=bold_font, fontSize=sz(10.5), leading=sz(13)),
         "date_row": ParagraphStyle("date_row", fontName=regular_font, fontSize=sz(9.5), leading=sz(13), alignment=TA_RIGHT),
         "bullet": ParagraphStyle("bullet", fontName=regular_font, fontSize=sz(10.5), leading=sz(13)),
-        "small": ParagraphStyle("small", fontName=regular_font, fontSize=sz(9.5), leading=sz(12)),
+        "small": ParagraphStyle("small", fontName=regular_font, fontSize=sz(9.5), leading=sz(12), spaceAfter=3 * scale),
     }
 
     story = []
