@@ -84,9 +84,10 @@ Each stage = one Claude Code subagent / skill with a narrow job.
 **Notes:** Separate "gaps you can reword toward" from "gaps you genuinely don't have" — don't let the tailoring stage paper over the second kind. Prompted with a senior-recruiter persona: score + gaps as before, plus a fast hiring-manager read (`top_missing_keywords`, `red_flags`) for a quick gut-check before the full tailoring pass.
 
 ### Stage 2 — Tailoring
-**In:** scoring output + master resume
-**Out:** `tailored_resume.yaml` (a filtered/reordered/lightly-reworded subset of master bullets, never new content) + a diff summary
+**In:** `jd_parsed.json` + scoring output + master resume
+**Out:** `{tailored_resume, diff_summary[], unaddressed_hard_gaps[], unaddressed_red_flags[], ats_scan_notes[]}` — `tailored_resume` is a filtered/reordered/lightly-reworded subset of master bullets, never new content
 **Hard rule (put this in CLAUDE.md):** no new claims, numbers, or skills not present in the master resume.
+**Notes:** Enforced in code, not just prompted — every selected bullet/skill/experience id is validated against `master_resume.yaml` (unknown ids dropped), and a reworded bullet is reverted to its original text if it introduces a number not present in the source bullet. Experience entries keep master-resume chronological order regardless of model output order; projects keep the model's relevance-ranked order. Rejections are appended to `diff_summary` so they're visible in review. The scoring output's `top_missing_keywords` and `red_flags` are explicit priorities for this stage — genuinely-covered ones get surfaced in the tailored bullets (using an "accomplished X, measured by Y, by doing Z" reword formula built only from facts already in the original bullet); ones with no real coverage are listed back out in `unaddressed_hard_gaps`/`unaddressed_red_flags` rather than faked. The model also self-reviews its own output as an ATS/hiring-manager skim ("200 resumes in one sitting") and rewrites any bullet that would get skipped as too generic/vague — logged in `ats_scan_notes`.
 
 ### Stage 3 — Render
 **In:** `tailored_resume.yaml`

@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Stage 2 -- Tailoring agent.
+
+Pure function: jd_parsed.json + score.json + master_resume.yaml in,
+{tailored_resume, diff_summary, unaddressed_hard_gaps, unaddressed_red_flags,
+ats_scan_notes} JSON out. No file writes, no DB writes -- orchestration/
+persistence happens one layer up.
+
+Hard rule (CLAUDE.md): may only select, reorder, and lightly reword bullets
+that already exist in master_resume.yaml -- never invent a bullet, metric, or
+skill. This is enforced here, not just prompted: every selected id is checked
+against the master resume, unknown skills are dropped, and reworded bullet
+text is rejected (reverted to the original) if it introduces a number that
+wasn't in the source bullet.
+"""
+
+import argparse
+import json
+import re
+from pathlib import Path
+from typing import List
+
+import anthropic
+import yaml
+from dotenv import load_dotenv
+from pydantic import BaseModel
+
+load_dotenv()
+
+DEFAULT_MODEL = "claude-haiku-4-5"
+
+SYSTEM_PROMPT = (
+    "You tailor a resume to a specific job by selecting, reordering, and lightly "
+    "rewording bullets that already exist in the candidate's master resume -- you "
+    "may NEVER invent a bullet, metric, skill, or claim that isn't already there. "
+    "A 'light reword' means rephrasing for emphasis or matching the JD's "
+    "terminology -- it must preserve every number, percentage, and factual claim "
+    "in the original bullet exactly. When rewording, prefer the formula "
+    "'Accomplished [X], as measured by [Y], by doing [Z]' -- built only from the "
+    "X, Y, and Z already present in that original bullet, never inventing a "
+    "metric just to complete the formula. If a bullet can't honestly fit that "
+    "formula or be reworded to fit the JD without changing its facts, use the "
+    "original text unchanged.\n\n"
+    "Select and order skills and bullets to foreground what matches this JD. "
+    "Prioritize bullets/skills the score input flagged as matched or as a "
+    "reword_opportunity. Then specifically check top_missing_keywords and "
+    "red_flags from the score input, in that priority order: for each one, if "
+    "the master resume genuinely covers it somewhere (even under different "
+    "wording), make sure a selected/reworded bullet surfaces it in this JD's "
+    "terminology; if the resume has no real coverage for it, do not fake "
+    "coverage -- list that keyword/red flag back out in unaddressed_hard_gaps "
+    "or unaddressed_red_flags instead of hiding it.\n\n"
+    "Finally, self-review your own selection like an ATS filter and a hiring "
+    "manager skimming 200 resumes in one sitting: which of your selected "
+    "bullets would get skipped -- too generic, too vague, buried lede, no "
+    "keyword signal? For each one you flag, actually change that bullet's text "
+    "field so it would stop the scroll instead of blending in -- don't leave "
+    "the text field unchanged and only describe the fix in ats_scan_notes. Only "
+    "describe an edit in ats_scan_notes/diff_summary if you actually changed "
+    "that bullet's text field to something different from the original; if you "
+    "kept it verbatim, don't claim you reworded it."
+)
+
+NUMERIC_TOKEN_RE = re.compile(r"\d[\d,]*\.?\d*%?\+?x?", re.IGNORECASE)
+
+
+class SelectedBullet(BaseModel):
+    id: str
+    text: str
+
+
+class SelectedExperience(BaseModel):
+    id: str
+    bullets: List[SelectedBullet]
+
+
+class SelectedProject(BaseModel):
+    id: str
+    bullets: List[SelectedBullet]
+
+
+class TailoringPlan(BaseModel):
+    selected_skills: List[str]
+    experience: List[SelectedExperience]
+    projects: List[SelectedProject]
+    diff_summary: List[str]
+    unaddressed_hard_gaps: List[str]
+    unaddressed_red_flags: List[str]
+    ats_scan_notes: List[str]
+
+
+def _numeric_tokens(text: str) -> set:
+    return set(NUMERIC_TOKEN_RE.findall(text))
+
+
+def _bullet_lookup(master_resume: dict) -> dict:
+    """bullet id -> original bullet text, across experience and projects."""
+    lookup = {}
+    for exp in master_resume.get("experience", []):
+        for b in exp.get("bullets", []):
+            lookup[b["id"]] = b["text"]
+    for proj in master_resume.get("projects", []):
+        for b in proj.get("bullets", []):
+            lookup[b["id"]] = b["text"]
+    return lookup
+
+
+def validate_and_build(plan: dict, master_resume: dict) -> dict:
+    """Enforce the no-fabrication hard rule and assemble the final tailored resume.
+
+    An unknown bullet/skill/experience id is dropped; a reworded bullet that
+    introduces a number not present in the original is reverted to the
+    original text. Every rejection is recorded in diff_summary so it's visible
+    in review, not silently swallowed.
+    """
+    bullet_text = _bullet_lookup(master_resume)
+    valid_skills = {s["name"] for s in master_resume.get("skills", [])}
+    exp_by_id = {e["id"]: e for e in master_resume.get("experience", [])}
+    proj_by_id = {p["id"]: p for p in master_resume.get("projects", [])}
+    master_exp_order = [e["id"] for e in master_resume.get("experience", [])]
+
+    warnings = []
+    actually_reworded_ids = []
+
+    def resolve_bullets(selected_bullets, valid_ids_for_parent):
+        resolved = []
+        for sb in selected_bullets:
+            if sb["id"] not in bullet_text or sb["id"] not in valid_ids_for_parent:
+                warnings.append(f"Dropped unknown bullet id '{sb['id']}' -- not in master resume.")
+                continue
+            original = bullet_text[sb["id"]]
+            if _numeric_tokens(sb["text"]) - _numeric_tokens(original):
+                warnings.append(
+                    f"Reworded text for bullet '{sb['id']}' introduced a number not in "
+                    f"the original -- reverted to original text."
+                )
+                resolved.append({"id": sb["id"], "text": original})
+            else:
+                if sb["text"] != original:
+                    actually_reworded_ids.append(sb["id"])
+                resolved.append({"id": sb["id"], "text": sb["text"]})
+        return resolved
+
+    tailored_experience_by_id = {}
+    for se in plan["experience"]:
+        exp = exp_by_id.get(se["id"])
+        if exp is None:
+            warnings.append(f"Dropped unknown experience id '{se['id']}'.")
+            continue
+        valid_ids = {b["id"] for b in exp["bullets"]}
+        tailored_experience_by_id[se["id"]] = {
+            **{k: v for k, v in exp.items() if k != "bullets"},
+            "bullets": resolve_bullets(se["bullets"], valid_ids),
+        }
+    # Keep original chronological order regardless of what order the model returned.
+    tailored_experience = [tailored_experience_by_id[eid] for eid in master_exp_order if eid in tailored_experience_by_id]
+
+    tailored_projects = []
+    for sp in plan["projects"]:
+        proj = proj_by_id.get(sp["id"])
+        if proj is None:
+            warnings.append(f"Dropped unknown project id '{sp['id']}'.")
+            continue
+        valid_ids = {b["id"] for b in proj["bullets"]}
+        tailored_projects.append({
+            **{k: v for k, v in proj.items() if k != "bullets"},
+            "bullets": resolve_bullets(sp["bullets"], valid_ids),
+        })
+    # Projects keep the model's relevance-ranked order (unlike experience, not chronological).
+
+    selected_skills = [s for s in plan["selected_skills"] if s in valid_skills]
+    for s in set(plan["selected_skills"]) - valid_skills:
+        warnings.append(f"Dropped unknown skill '{s}' -- not in master resume.")
+
+    # Ground truth, computed from the actual output -- not the model's self-report.
+    # ats_scan_notes/diff_summary above are the model's own rationale and can describe
+    # an edit it didn't actually make; this line is always accurate.
+    if actually_reworded_ids:
+        warnings.append(f"Bullets with text actually changed from the master resume: {actually_reworded_ids}")
+    else:
+        warnings.append("No bullet text was changed from the master resume -- all selected bullets kept verbatim.")
+
+    tailored_resume = {
+        "basics": master_resume["basics"],
+        "skills": selected_skills,
+        "experience": tailored_experience,
+        "projects": tailored_projects,
+        "education": master_resume.get("education", []),
+        "certifications": master_resume.get("certifications", []),
+    }
+
+    return {
+        "tailored_resume": tailored_resume,
+        "diff_summary": plan["diff_summary"] + warnings,
+        "unaddressed_hard_gaps": plan["unaddressed_hard_gaps"],
+        "unaddressed_red_flags": plan["unaddressed_red_flags"],
+        "ats_scan_notes": plan["ats_scan_notes"],
+    }
+
+
+def tailor_resume(jd_parsed: dict, score: dict, master_resume: dict, model: str = DEFAULT_MODEL) -> dict:
+    """Produce a tailored resume from the JD, score output, and master resume."""
+    client = anthropic.Anthropic()
+    user_content = (
+        f"Job description (parsed):\n{json.dumps(jd_parsed, indent=2)}\n\n"
+        f"Score/gap analysis:\n{json.dumps(score, indent=2)}\n\n"
+        f"Candidate's master resume (only reference ids/text from here):\n"
+        f"{yaml.dump(master_resume, sort_keys=False)}"
+    )
+    response = client.messages.parse(
+        model=model,
+        max_tokens=8000,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": user_content}],
+        output_format=TailoringPlan,
+    )
+    plan = response.parsed_output.model_dump()
+    return validate_and_build(plan, master_resume)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Tailor the master resume to a scored JD.")
+    parser.add_argument("--jd-json", required=True, help="Path to jd_parsed.json")
+    parser.add_argument("--score-json", required=True, help="Path to score.json (output of score.py)")
+    parser.add_argument("--resume", type=Path, default=Path("data/master_resume.yaml"), help="Path to master_resume.yaml")
+    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model to use (default: {DEFAULT_MODEL})")
+    args = parser.parse_args()
+
+    jd_parsed = json.loads(Path(args.jd_json).read_text())
+    score = json.loads(Path(args.score_json).read_text())
+    master_resume = yaml.safe_load(args.resume.read_text())
+
+    result = tailor_resume(jd_parsed, score, master_resume, model=args.model)
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()
