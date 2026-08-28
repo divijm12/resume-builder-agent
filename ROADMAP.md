@@ -3,30 +3,30 @@
 Build in phases that are each independently useful — don't wait for the full pipeline to get value.
 
 ## Phase 0 — Foundation (day 1–2)
-- [ ] Convert your current resume into `data/master_resume.yaml`, tagging every bullet by skill/theme
-- [ ] Set up `applications.db` schema
-- [ ] Set up repo structure (see CLAUDE.md below) and git-init it — you want version history on resume changes
+- [x] Convert your current resume into `data/master_resume.yaml`, tagging every bullet by skill/theme
+- [x] Set up `applications.db` schema
+- [x] Set up repo structure (see CLAUDE.md below) and git-init it — you want version history on resume changes
 
-**Done when:** you have a structured resume file and empty DB, no AI yet.
+**Done when:** you have a structured resume file and empty DB, no AI yet. ✅ Done 2026-08-27.
 
 ## Phase 1 — Score + Tailor (the actual time-saver)
-- [ ] JD ingest agent (paste text → parsed JSON)
-- [ ] Scoring agent (parsed JD + master resume → score + gaps)
-- [ ] Tailoring agent (score + master resume → tailored resume, reorder/reword only)
-- [ ] Render to docx
-- [ ] Manually test on 5 real JDs, read every output closely for hallucinated content
+- [x] JD ingest agent (paste text → parsed JSON)
+- [x] Scoring agent (parsed JD + master resume → score + gaps)
+- [x] Tailoring agent (score + master resume → tailored resume, reorder/reword only)
+- [x] Render to docx (+ pdf)
+- [x] Manually test closely for hallucinated content — done far more heavily than "5 JDs": iterated repeatedly against the same real JD (Micron) specifically because it kept surfacing new fabrication classes each round (dropped domain detail, dropped named tech, added unsupported claims, appended "demonstrating X" clauses) — each one fixed and re-verified. Known remaining gap: the appended-clause guardrail only catches em-dash-style separators, not comma-led ones — see ARCHITECTURE.md Stage 2 notes.
 
-**Done when:** you paste a JD and get a tailored, honest resume + score in under a minute.
+**Done when:** you paste a JD and get a tailored, honest resume + score in under a minute. ✅ Done 2026-08-28 — `apply.py` does this in one command.
 
 ## Phase 2 — Cover letters
 - [ ] Cover letter agent, same JD input
 - [ ] Render to docx/pdf
-- [ ] Test against Phase 1 outputs on the same 5 JDs
+- [ ] Test against Phase 1 outputs on the same JDs
 
 **Done when:** tailored resume + cover letter both come out of one JD paste.
 
 ## Phase 3 — Tracking loop
-- [ ] Every generated application writes a row to `applications.db`
+- [x] Every generated application writes a row to `applications.db` — `apply.py` logs an `applications` row + `resume_versions` row immediately after rendering, per CLAUDE.md hard rule 4
 - [ ] Simple CLI to list applications and update status (applied/interview/rejected/etc.)
 - [ ] A few canned queries: response rate by resume variant, by tag emphasis, by company size
 

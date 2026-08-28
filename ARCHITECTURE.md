@@ -114,6 +114,9 @@ Each stage = one Claude Code subagent / skill with a narrow job.
 ### Stage 7 — Review Queue (human checkpoint)
 A simple local view (CLI table or lightweight web UI) listing pending drafts: resume diff, cover letter, outreach email, contact confidence. You approve/edit/send from here. **Sending is the one action that is never automated.**
 
+### Orchestrator — `apply.py`
+Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refers to. Agents (`agents/*.py`) stay pure (JSON in, JSON out, no side effects); `apply.py` is what actually chains ingest → score → tailor → render and owns the file/DB persistence those stages don't do themselves. Built 2026-08-28 specifically to close the gap between hard rule 4 ("log the application in `applications.db` immediately after generation") being written down from Phase 0 and actually being implemented — nothing wrote to `applications.db` before this existed. `run_pipeline()` auto-extracts company/role from the parsed JD (`--company`/`--role` override if the JD doesn't state one or extraction is wrong) and calls `log_application()` right after rendering, inserting one `applications` row (status defaults to `'drafted'`) and one `resume_versions` row (`diff_from_master` = the tailoring stage's `diff_summary`, JSON-encoded). `match_score` logged is `score_after` (the tailored resume's score), not `score_before` — the row should reflect what's actually being submitted.
+
 ---
 
 ## 4. Tech stack

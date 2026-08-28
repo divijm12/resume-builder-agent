@@ -8,6 +8,7 @@ A personal job-application pipeline: paste a JD → score against my resume → 
 
 ## Repo structure
 ```
+apply.py                   # orchestrator: ingest -> score -> tailor -> render -> log
 data/
   master_resume.yaml       # source of truth, structured, tagged bullets
   applications.db          # SQLite — one row per application
@@ -15,19 +16,20 @@ agents/
   ingest_jd.py
   score.py
   tailor.py
-  cover_letter.py
-  find_contact.py
-  draft_outreach.py
+  cover_letter.py          # not yet built (Phase 2)
+  find_contact.py          # not yet built (Phase 4)
+  draft_outreach.py        # not yet built (Phase 5)
 render/
-  resume_template.docx
-  render.py
+  render.py                # builds docx (python-docx) + pdf (reportlab) programmatically,
+                            # no template file -- see ARCHITECTURE.md Stage 3
 review/
-  cli.py                   # review queue
+  cli.py                   # review queue -- not yet built (Phase 5)
 outputs/
   <company>_<role>_<date>/
-    resume.docx
-    cover_letter.docx
-    outreach_draft.md
+    <Firstname>_<Lastname>_<Company>_<Role>.docx
+    <Firstname>_<Lastname>_<Company>_<Role>.pdf
+    cover_letter.docx      # not yet built (Phase 2)
+    outreach_draft.md      # not yet built (Phase 5)
 ```
 
 ## Hard rules — do not violate these
@@ -46,6 +48,9 @@ outputs/
 - When in doubt about a scope decision, default to the more conservative/manual option and ask rather than automating further.
 
 ## Commands
-(fill in as they're built, e.g.)
-- `python agents/score.py --jd path/to/jd.txt` — score JD against master resume
-- `python review/cli.py` — open the review queue
+- `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values.
+- `python agents/ingest_jd.py --file path/to/jd.txt` — Stage 0 alone
+- `python agents/score.py --jd-json path/to/jd_parsed.json` — Stage 1 alone
+- `python agents/tailor.py --jd-json ... --score-json ...` — Stage 2 alone
+- `python render/render.py --tailored-json ... --company ... --role ...` — Stage 3 alone
+- `python review/cli.py` — open the review queue (not yet built)
