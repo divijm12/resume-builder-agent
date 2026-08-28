@@ -458,4 +458,56 @@ resume content itself.
 
 ---
 
+## 11. Three more real fixes in one session: dates, a hard score floor, and a truncation bug
+
+**Why score.py didn't know how long you'd worked somewhere.** A real run's
+red_flags claimed "only 6 months current role experience" for a role that
+actually started 2024-05 — over two years earlier. The cause: `score.py`
+handed the model raw `start`/`end` dates and asked it to reason about
+"present," but an LLM has no built-in, reliable notion of today's actual
+date — it tends to reason as if "now" is near its training data's
+timeframe. The fix wasn't a better-worded prompt (this project's prompts
+have never held reliably for anything checkable); it was computing the
+duration in Python (`_tenure_str`) and handing the model the finished
+answer, the same move as `tailor.py`'s `_date_rank` for chronological
+sorting. Same idea, taken further: since your resume's education entry had
+no graduation date at all, there was no way for the model to judge whether
+"entry-level, 0–2 years" made sense against your actual timeline — adding
+the real graduation date (2025-05) and computing, in code, how much of
+each job's tenure fell before vs. after it (pre-grad reads as internship/
+part-time work, post-grad as real professional tenure) gave the scorer an
+honestly calibrated basis instead of a guess.
+
+**A hard floor: tailoring can never make your score worse.** You asked for
+a non-negotiable guarantee — if the tailored resume would score lower than
+your resume as-is, don't ship it, fall back to the original. The
+interesting engineering question wasn't "add an if-statement," it was how
+to make the fallback a genuine *guarantee* rather than "probably fine."
+The key move: when the guardrail fires, `score_after` is set to the exact
+same object as `score_before` — never re-scored — because re-scoring is
+itself another LLM call, and even identical content can come back with a
+slightly different number the second time. A guarantee can't be built on
+top of something non-deterministic; it has to be built on "this is
+literally the content that number was already measured against." Verified
+with mocked API calls (both "guardrail should fire" and "guardrail should
+stay out of the way" cases) before ever spending a real request on it —
+and then it fired for real on a genuinely mismatched JD (a J&J embedded-
+systems role against a resume with no C++ or embedded Linux at all):
+proposed tailoring scored 47 vs. the original 50, got discarded, you got
+your honest resume back unchanged.
+
+**A plain infrastructure bug, for contrast.** Running the pipeline with
+Sonnet for the first time failed outright: "Invalid JSON: EOF while
+parsing a string." Not a model-reasoning problem — `tailor.py`'s API call
+was capped at `max_tokens=8000`, sized around Haiku's typically terser
+output, and Sonnet's more elaborate response got cut off mid-sentence
+before the JSON could close. Worth noting only because it's a different
+*kind* of bug than everything else in this log: not "the model said
+something untrue," just "the response didn't fit in the box we gave it."
+Raising the cap (16000) fixed it outright — no guardrail, no code
+verification needed, because there was nothing to verify: a truncated
+response either parses or it doesn't.
+
+---
+
 *(more entries added as this project continues)*
