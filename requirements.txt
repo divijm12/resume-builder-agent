@@ -2,3 +2,6 @@ anthropic
 pyyaml
 python-dotenv
 pydantic
+python-docx
+reportlab
+pypdf
