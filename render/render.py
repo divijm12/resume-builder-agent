@@ -361,10 +361,22 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
         story.append(t)
 
     def bullet_list(items):
+        # bulletFontSize must match the paragraph's own font size -- reportlab
+        # does not inherit it from the Paragraph style, and left at its
+        # unrelated default it draws the dot using the wrong font metrics,
+        # which is barely visible on a one-line item but drifts further from
+        # the first line's baseline the more lines an item wraps to. This is
+        # a general correctness fix (derived from the same dynamic `scale`
+        # used everywhere else), not tuned to any one resume's content.
         story.append(
             ListFlowable(
                 [
-                    ListItem(Paragraph(escape(b), styles["bullet"]), spaceAfter=3 * scale, bulletFontName=regular_font)
+                    ListItem(
+                        Paragraph(escape(b), styles["bullet"]),
+                        spaceAfter=3 * scale,
+                        bulletFontName=regular_font,
+                        bulletFontSize=styles["bullet"].fontSize,
+                    )
                     for b in items
                 ],
                 bulletType="bullet",
