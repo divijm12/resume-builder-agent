@@ -7,8 +7,13 @@ unaddressed_red_flags, unaddressed_reword_opportunities, ats_scan_notes,
 score_before, score_after, overall_score_delta} JSON out. No file writes, no
 DB writes -- orchestration/persistence happens one layer up.
 
-diff_summary is the model's own narrative (plain language, no internal ids)
--- safe to show a user directly. validation_log is the code-computed ground
+diff_summary is the model's own narrative of its selection/ordering/skill
+choices (plain language, no internal ids) plus code-generated lines noting
+which sections had bullets actually reworded (only bullets that survived
+every guardrail below -- the model is explicitly barred from narrating
+specific bullet-wording changes itself, since it can't know pre-validation
+whether a given reword will be reverted) -- safe to show a user directly.
+validation_log is the code-computed ground
 truth and guardrail actions (references master_resume.yaml bullet ids like
 "b_004", raw rejection messages) -- an audit trail, not written for
 end-user display; a UI should hide/collapse it rather than show it inline.
@@ -140,7 +145,46 @@ _SHARED_CORE_PROMPT = (
     "back it up; that's the skill-level equivalent of a light bullet reword, "
     "not fabrication. It would NOT be fine to relabel 'SQL (PostgreSQL, "
     "MySQL)' as 'NoSQL databases' -- that's a different, unsupported "
-    "capability, not a rename of the same one."
+    "capability, not a rename of the same one.\n\n"
+    "When deciding which skills to select, distinguish two categories. "
+    "General-purpose/foundational skills -- widely-applicable languages, "
+    "tools, and practices not tied to one specific domain (e.g. Python, Git, "
+    "SQL, unit testing, cross-functional collaboration) -- should almost "
+    "always stay selected regardless of what the JD asks for. They never "
+    "read as a distraction, and dropping one only makes the resume less "
+    "differentiated, not more focused -- do not remove a general-purpose "
+    "skill just because the JD doesn't happen to mention it. Narrow/"
+    "specialist skills tied to one specific domain (e.g. a particular AI "
+    "framework, a specific vendor API, niche ML tooling) MAY be trimmed down "
+    "when the JD has no footprint in that domain at all -- a long list of "
+    "niche framework names reads as keyword-stuffing to a recruiter skimming "
+    "in seconds. But never trim a domain down to zero if the master resume "
+    "shows genuine depth there (multiple real skills and/or bullets in that "
+    "area) -- keep a small representative subset (roughly 2-3 of the "
+    "strongest, most recognizable ones) instead of removing the domain "
+    "entirely. The goal is proportion, not erasure: a recruiter should come "
+    "away thinking 'this candidate also has real depth in X, secondary to "
+    "this role' -- never a wall of niche names, but never zero trace of it "
+    "either.\n\n"
+    "diff_summary is shown directly to the candidate, so it has two hard "
+    "rules. First: never write a bullet's internal id (like 'b_003' or "
+    "'p_008') anywhere in diff_summary, ats_scan_notes, or the "
+    "unaddressed_* fields -- refer to bullets by their company/project name "
+    "instead (e.g. 'the GeoVerify liveness-detection bullet'), never by id. "
+    "Second, and more important: do NOT describe a specific bullet-wording "
+    "change in diff_summary at all (no 'reworded X to Y' lines) -- you "
+    "cannot know from inside this response whether a given reword will "
+    "survive the accuracy check that runs after you respond, so any claim "
+    "you make about *what* changed in a bullet's wording may end up "
+    "describing an edit that gets reverted, which is worse than not "
+    "claiming it. The system separately and accurately documents which "
+    "bullets' wording actually changed once that check has run -- you do "
+    "not need to and should not do this yourself. In diff_summary, only "
+    "describe: which skills you selected or relabeled and why, which "
+    "experience/projects you chose to include and how you ordered them, "
+    "and how that selection surfaces this JD's reword_opportunities/"
+    "missing keywords -- never the specific before/after text of a reworded "
+    "bullet."
 )
 
 _AGGRESSIVE_MODE_PROMPT = (
@@ -328,8 +372,14 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
 
     warnings = []
     actually_reworded_ids = []
+    # parent display name (e.g. "GeoVerify", "Forestallers") -> count of bullets
+    # actually reworded there, computed only from bullets that survived every
+    # guardrail below -- this is what diff_summary's reword narration is built
+    # from, instead of the model's own pre-validation claim (see resolve_bullets;
+    # the model's claim can describe an edit that gets reverted two lines later).
+    reworded_by_parent: dict = {}
 
-    def resolve_bullets(selected_bullets, valid_ids_for_parent):
+    def resolve_bullets(selected_bullets, valid_ids_for_parent, parent_label):
         resolved = []
         for sb in selected_bullets:
             if sb["id"] not in bullet_text or sb["id"] not in valid_ids_for_parent:
@@ -380,6 +430,7 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
             else:
                 if new_text != original:
                     actually_reworded_ids.append(sb["id"])
+                    reworded_by_parent[parent_label] = reworded_by_parent.get(parent_label, 0) + 1
                 resolved.append({"id": sb["id"], "text": new_text})
         return resolved
 
@@ -392,7 +443,7 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
         valid_ids = {b["id"] for b in exp["bullets"]}
         tailored_experience.append({
             **{k: v for k, v in exp.items() if k != "bullets"},
-            "bullets": resolve_bullets(se["bullets"], valid_ids),
+            "bullets": resolve_bullets(se["bullets"], valid_ids, exp.get("company", exp["id"])),
         })
     # Reverse-chronological order, by end date (or start if ongoing/no end) --
     # enforced in code regardless of what order the model returned, per user
@@ -408,7 +459,7 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
         valid_ids = {b["id"] for b in proj["bullets"]}
         tailored_projects.append({
             **{k: v for k, v in proj.items() if k != "bullets"},
-            "bullets": resolve_bullets(sp["bullets"], valid_ids),
+            "bullets": resolve_bullets(sp["bullets"], valid_ids, proj.get("name", proj["id"])),
         })
     # Reverse-chronological by the project's single `date` field.
     tailored_projects.sort(key=lambda p: _date_rank(p.get("date")), reverse=True)
@@ -464,11 +515,57 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
         "certifications": tailored_certifications,
     }
 
+    # Backstop for the "never write an internal id in diff_summary" prompt rule
+    # above -- prompt-only enforcement of a structurally-checkable rule hasn't
+    # held reliably elsewhere in this file (see _has_appended_clause), so don't
+    # just trust it here either. Strip a parenthetical made entirely of known
+    # ids (the exact shape seen in production: "(b_001, b_002, b_003)"). If an
+    # id still appears after that, drop the whole line rather than show the
+    # user a partially-scrubbed fragment -- a line that still names an id is,
+    # by definition, exactly the specific-bullet-wording narration the prompt
+    # rule above already says not to write, so dropping it is consistent, not
+    # just a formatting fix. Always logged in validation_log so the slip is
+    # visible in the audit trail rather than silently swallowed.
+    all_ids = set(bullet_text.keys()) | set(exp_by_id.keys()) | set(proj_by_id.keys())
+    cleaned_model_diff_summary = []
+    if all_ids:
+        id_alt = "|".join(re.escape(i) for i in sorted(all_ids, key=len, reverse=True))
+        paren_ids_re = re.compile(rf"\s*\((?:{id_alt})(?:,\s*(?:{id_alt}))*\)")
+        id_word_re = re.compile(rf"\b(?:{id_alt})\b")
+        for line in plan["diff_summary"]:
+            cleaned = paren_ids_re.sub("", line)
+            if id_word_re.search(cleaned):
+                warnings.append(
+                    f"diff_summary line referenced an internal id despite the "
+                    f"prompt rule against it -- dropped from the user-facing "
+                    f"summary rather than shown: {line!r}"
+                )
+                continue
+            cleaned_model_diff_summary.append(cleaned)
+    else:
+        cleaned_model_diff_summary = list(plan["diff_summary"])
+
+    # Code-generated, ground-truth reword lines -- built only from bullets that
+    # actually survived every guardrail above, unlike the model's own diff_summary
+    # (which is written before validation runs and can describe an edit that gets
+    # reverted two lines later -- exactly what happened with a real GeoVerify/
+    # TensorFlow bullet in production: the model's summary claimed a rewording
+    # that the guardrail had already blocked). No ids, just a plain count per
+    # section, so it can never mismatch what's actually in tailored_resume.
+    reword_summary_lines = [
+        f"Reworded {count} bullet{'s' if count != 1 else ''} in {parent} to better match the JD."
+        for parent, count in reworded_by_parent.items()
+    ]
+
     return {
         "tailored_resume": tailored_resume,
-        # Model's own narrative, in plain language, no internal ids -- safe to show
-        # a user directly.
-        "diff_summary": plan["diff_summary"],
+        # Model's own narrative (selection/ordering/skill rationale, in plain
+        # language, no internal ids -- safe to show a user directly), plus the
+        # code-generated reword lines above appended after it. The model is
+        # explicitly instructed not to narrate specific bullet-wording changes
+        # itself (see _SHARED_CORE_PROMPT) precisely so this list can't disagree
+        # with what actually shipped in tailored_resume.
+        "diff_summary": cleaned_model_diff_summary + reword_summary_lines,
         # Code-computed ground truth and guardrail actions (references bullet ids
         # like "b_004" from master_resume.yaml's tagging scheme, and raw rejection
         # messages) -- an audit trail for verifying the no-fabrication rule held,
