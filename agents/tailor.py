@@ -2,10 +2,16 @@
 """Stage 2 -- Tailoring agent.
 
 Pure function: jd_parsed.json + score.json + master_resume.yaml in,
-{tailored_resume, diff_summary, unaddressed_hard_gaps, unaddressed_red_flags,
-unaddressed_reword_opportunities, ats_scan_notes, score_before, score_after,
-overall_score_delta} JSON out. No file writes, no DB writes -- orchestration/
-persistence happens one layer up.
+{tailored_resume, diff_summary, validation_log, unaddressed_hard_gaps,
+unaddressed_red_flags, unaddressed_reword_opportunities, ats_scan_notes,
+score_before, score_after, overall_score_delta} JSON out. No file writes, no
+DB writes -- orchestration/persistence happens one layer up.
+
+diff_summary is the model's own narrative (plain language, no internal ids)
+-- safe to show a user directly. validation_log is the code-computed ground
+truth and guardrail actions (references master_resume.yaml bullet ids like
+"b_004", raw rejection messages) -- an audit trail, not written for
+end-user display; a UI should hide/collapse it rather than show it inline.
 Rescores the tailored resume with score.py's own scoring function (same
 recruiter-persona prompt) so the impact of tailoring is visible, not assumed
 -- this means every run makes two model calls, not one.
@@ -401,7 +407,15 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
 
     return {
         "tailored_resume": tailored_resume,
-        "diff_summary": plan["diff_summary"] + warnings,
+        # Model's own narrative, in plain language, no internal ids -- safe to show
+        # a user directly.
+        "diff_summary": plan["diff_summary"],
+        # Code-computed ground truth and guardrail actions (references bullet ids
+        # like "b_004" from master_resume.yaml's tagging scheme, and raw rejection
+        # messages) -- an audit trail for verifying the no-fabrication rule held,
+        # not written for end-user display. Keep separate so a UI can choose to
+        # hide/collapse it instead of exposing internal ids in the main view.
+        "validation_log": warnings,
         "unaddressed_hard_gaps": plan["unaddressed_hard_gaps"],
         "unaddressed_red_flags": plan["unaddressed_red_flags"],
         "unaddressed_reword_opportunities": plan["unaddressed_reword_opportunities"],

@@ -168,6 +168,25 @@ export default function ApplicationDetail() {
           </details>
         </Section>
       )}
+
+      {tr && tr.validation_log.length > 0 && (
+        <div className="mb-6">
+          <details>
+            <summary className="cursor-pointer text-sm text-slate-500 hover:underline">
+              Show technical validation log
+            </summary>
+            <p className="mt-2 text-xs text-slate-400">
+              Internal guardrail activity (references master resume bullet ids) — kept for
+              auditing, not meant to be polished reading.
+            </p>
+            <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-slate-500">
+              {tr.validation_log.map((line, i) => (
+                <li key={i}>{line}</li>
+              ))}
+            </ul>
+          </details>
+        </div>
+      )}
     </div>
   );
 }

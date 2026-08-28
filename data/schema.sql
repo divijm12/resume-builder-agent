@@ -12,9 +12,12 @@ CREATE TABLE applications (
   match_score REAL,
   resume_variant_path TEXT,
   cover_letter_path TEXT,
-  -- Full tailor.py output (tailored_resume, diff_summary, unaddressed_*,
-  -- ats_scan_notes, score_before, score_after, overall_score_delta) as one
-  -- JSON blob -- everything the review UI needs without re-deriving anything.
+  -- Full tailor.py output (tailored_resume, diff_summary, validation_log,
+  -- unaddressed_*, ats_scan_notes, score_before, score_after,
+  -- overall_score_delta) as one JSON blob -- everything the review UI needs
+  -- without re-deriving anything. diff_summary is user-facing; validation_log
+  -- is an internal audit trail (references master_resume.yaml bullet ids) --
+  -- a UI should hide/collapse it, not show it inline.
   tailor_result_json TEXT,
   status TEXT NOT NULL DEFAULT 'drafted'
     CHECK (status IN ('drafted','applied','outreach_sent','interview','rejected','ghosted','offer')),

@@ -33,7 +33,12 @@ export interface ScoreResult {
 
 export interface TailorResult {
   tailored_resume: Record<string, unknown>;
+  /** Plain-language, no internal ids -- safe to show directly. */
   diff_summary: string[];
+  /** Internal audit trail (references master_resume.yaml bullet ids like
+   * "b_004", raw guardrail rejection messages) -- keep collapsed/hidden in
+   * the main view, don't show inline. */
+  validation_log: string[];
   unaddressed_hard_gaps: string[];
   unaddressed_red_flags: string[];
   unaddressed_reword_opportunities: string[];
