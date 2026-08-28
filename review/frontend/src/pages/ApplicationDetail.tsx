@@ -11,27 +11,41 @@ import {
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="mb-6">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-slate-500">{title}</h2>
+      <h2 className="mb-2.5 text-[11px] font-semibold uppercase tracking-wide text-[#6b7690]">{title}</h2>
       {children}
     </div>
   );
 }
 
+const TONE_COLORS = {
+  green: { bg: "#0f2a1e", text: "#4ade80", border: "#1a4230" },
+  red: { bg: "#2a1416", text: "#f87171", border: "#432026" },
+  amber: { bg: "#2a2410", text: "#f2c94c", border: "#433a1a" },
+};
+
 function Pills({ items, tone }: { items: string[]; tone: "green" | "red" | "amber" }) {
-  const toneClass = {
-    green: "bg-green-50 text-green-700 border-green-200",
-    red: "bg-red-50 text-red-700 border-red-200",
-    amber: "bg-amber-50 text-amber-700 border-amber-200",
-  }[tone];
-  if (items.length === 0) return <p className="text-sm text-slate-400">None</p>;
+  const c = TONE_COLORS[tone];
+  if (items.length === 0) return <p className="text-sm text-[#4a5468]">None</p>;
   return (
     <div className="flex flex-wrap gap-1.5">
       {items.map((item, i) => (
-        <span key={i} className={`rounded-full border px-2 py-0.5 text-xs ${toneClass}`}>
+        <span
+          key={i}
+          className="rounded-full border px-2.5 py-1 text-xs"
+          style={{ background: c.bg, color: c.text, borderColor: c.border }}
+        >
           {item}
         </span>
       ))}
     </div>
+  );
+}
+
+function DownloadIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M12 3v12m0 0l-4-4m4 4l4-4M4 19h16" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
 
@@ -61,22 +75,27 @@ export default function ApplicationDetail() {
     }
   }
 
-  if (error) return <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>;
-  if (!app) return <p className="text-sm text-slate-500">Loading…</p>;
+  if (error)
+    return (
+      <p className="rounded-md border border-[#3a1f22] bg-[#1a1013] p-3 text-sm text-[#f87171]">{error}</p>
+    );
+  if (!app) return <p className="text-sm text-[#6b7690]">Loading…</p>;
 
   const tr = app.tailor_result;
+  const delta = tr?.overall_score_delta ?? 0;
+  const deltaColor = delta > 0 ? "#4ade80" : delta < 0 ? "#f87171" : "#6b7690";
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Link to="/" className="mb-4 inline-block text-sm text-slate-500 hover:underline">
+      <Link to="/" className="mb-4 inline-block text-sm text-[#6b7690] hover:text-[#e4e8f0]">
         ← All applications
       </Link>
 
-      <div className="mb-6 flex items-start justify-between">
+      <div className="mb-5 flex items-start justify-between rounded-lg border border-[#1c2431] bg-[#10141d] p-6">
         <div>
-          <h1 className="text-2xl font-semibold">{app.company}</h1>
-          <p className="text-slate-600">{app.role_title}</p>
-          <span className="mt-1 inline-block rounded-full bg-slate-100 px-2 py-0.5 text-xs capitalize text-slate-500">
+          <h1 className="text-xl font-semibold">{app.company}</h1>
+          <p className="text-[#9db3c9]">{app.role_title}</p>
+          <span className="mt-2 inline-block rounded-full border border-[#232b3a] bg-[#0c0f16] px-2.5 py-0.5 text-xs capitalize text-[#6b7690]">
             {app.mode} mode
           </span>
         </div>
@@ -84,10 +103,10 @@ export default function ApplicationDetail() {
           value={app.status}
           disabled={savingStatus}
           onChange={(e) => handleStatusChange(e.target.value)}
-          className="rounded-md border border-slate-300 px-3 py-1.5 text-sm"
+          className="rounded-md border border-[#232b3a] bg-[#0c0f16] px-3 py-1.5 text-sm text-[#e4e8f0] focus:border-[#4fd6f0] focus:outline-none"
         >
           {APPLICATION_STATUSES.map((s) => (
-            <option key={s} value={s}>
+            <option key={s} value={s} className="bg-[#10141d]">
               {s}
             </option>
           ))}
@@ -99,36 +118,39 @@ export default function ApplicationDetail() {
           href={fileUrl(app.id, "pdf")}
           target="_blank"
           rel="noreferrer"
-          className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
+          className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
         >
-          Open PDF
+          <DownloadIcon /> Open PDF
         </a>
         <a
           href={fileUrl(app.id, "docx")}
           target="_blank"
           rel="noreferrer"
-          className="rounded-md border border-slate-300 px-4 py-2 text-sm font-medium hover:bg-slate-50"
+          className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
         >
-          Open Word doc
+          <DownloadIcon /> Open Word doc
         </a>
       </div>
 
       {tr && (
         <>
           <Section title="Score">
-            <div className="flex items-center gap-3">
-              <span className="text-2xl font-semibold text-slate-400">
+            <div className="flex items-center gap-4 rounded-lg border border-[#1c2431] bg-[#10141d] px-6 py-4">
+              <span className="font-mono text-2xl font-semibold text-[#6b7690]">
                 {tr.score_before.overall_score.toFixed(0)}
               </span>
-              <span className="text-slate-400">→</span>
-              <span className="text-2xl font-semibold text-slate-900">
+              <svg width="18" height="14" viewBox="0 0 24 24" fill="none" stroke="#4a5468" strokeWidth="2.5">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+              <span className="font-mono text-2xl font-semibold text-[#4fd6f0]">
                 {tr.score_after.overall_score.toFixed(0)}
               </span>
               <span
-                className={`text-sm font-medium ${tr.overall_score_delta > 0 ? "text-green-600" : tr.overall_score_delta < 0 ? "text-red-600" : "text-slate-400"}`}
+                className="ml-auto rounded-full px-2.5 py-1 font-mono text-xs font-semibold"
+                style={{ color: deltaColor, background: "#0c0f16" }}
               >
-                {tr.overall_score_delta > 0 ? "+" : ""}
-                {tr.overall_score_delta.toFixed(0)}
+                {delta > 0 ? "+" : ""}
+                {delta.toFixed(0)}
               </span>
             </div>
           </Section>
@@ -147,11 +169,14 @@ export default function ApplicationDetail() {
 
           <Section title="What changed in this tailoring pass">
             {tr.diff_summary.length === 0 ? (
-              <p className="text-sm text-slate-400">No changes recorded.</p>
+              <p className="text-sm text-[#4a5468]">No changes recorded.</p>
             ) : (
-              <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
+              <ul className="space-y-1.5 text-sm text-[#b8c0d4]">
                 {tr.diff_summary.map((line, i) => (
-                  <li key={i}>{line}</li>
+                  <li key={i} className="flex gap-2.5">
+                    <span className="mt-2 h-1 w-1 flex-shrink-0 rounded-full bg-[#4fd6f0]" />
+                    {line}
+                  </li>
                 ))}
               </ul>
             )}
@@ -162,10 +187,10 @@ export default function ApplicationDetail() {
       {app.jd_raw && (
         <Section title="Job description">
           <details>
-            <summary className="cursor-pointer text-sm text-slate-500 hover:underline">
+            <summary className="cursor-pointer text-sm text-[#6b7690] hover:text-[#e4e8f0]">
               Show raw JD text
             </summary>
-            <pre className="mt-2 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md bg-slate-100 p-3 text-xs text-slate-700">
+            <pre className="mt-2 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-md border border-[#1c2431] bg-[#10141d] p-3 font-mono text-xs text-[#9db3c9]">
               {app.jd_raw}
             </pre>
           </details>
@@ -175,16 +200,16 @@ export default function ApplicationDetail() {
       {tr && tr.validation_log.length > 0 && (
         <div className="mb-6">
           <details>
-            <summary className="cursor-pointer text-sm text-slate-500 hover:underline">
+            <summary className="cursor-pointer text-sm text-[#6b7690] hover:text-[#e4e8f0]">
               Show technical validation log
             </summary>
-            <p className="mt-2 text-xs text-slate-400">
-              Internal guardrail activity (references master resume bullet ids) — kept for
-              auditing, not meant to be polished reading.
+            <p className="mt-2 text-xs text-[#4a5468]">
+              Internal guardrail activity (references master resume bullet ids) — kept for auditing, not
+              meant to be polished reading.
             </p>
-            <ul className="mt-1 list-disc space-y-1 pl-5 text-xs text-slate-500">
+            <ul className="mt-1 space-y-1 font-mono text-xs text-[#4a5468]">
               {tr.validation_log.map((line, i) => (
-                <li key={i}>{line}</li>
+                <li key={i}>— {line}</li>
               ))}
             </ul>
           </details>

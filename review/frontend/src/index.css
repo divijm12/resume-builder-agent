@@ -1,5 +1,30 @@
 @import "tailwindcss";
 
+:root {
+  --bg: #0c0f16;
+  --panel: #10141d;
+  --panel-border: #1c2431;
+  --input-bg: #0c0f16;
+  --input-border: #232b3a;
+  --text: #e4e8f0;
+  --text-secondary: #b8c0d4;
+  --text-muted: #6b7690;
+  --text-faint: #4a5468;
+  --cyan: #4fd6f0;
+  --magenta: #f088c9;
+}
+
 body {
-  @apply bg-slate-50 text-slate-900;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Space Grotesk", system-ui, sans-serif;
+}
+
+::selection {
+  background: var(--cyan);
+  color: var(--bg);
+}
+
+.font-mono {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
 }

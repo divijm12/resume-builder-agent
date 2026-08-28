@@ -2,32 +2,42 @@ import { NavLink, Outlet } from "react-router-dom";
 
 export default function App() {
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-4xl items-center gap-6 px-6 py-4">
-          <span className="text-lg font-semibold">Resume Pipeline</span>
-          <nav className="flex gap-4 text-sm">
+    <div className="min-h-screen bg-[#0c0f16]">
+      <header className="border-b border-[#1c2431]">
+        <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-5">
+          <NavLink to="/" className="text-[17px] font-bold tracking-tight text-[#e4e8f0]">
+            Resume<span className="text-[#4fd6f0]">Pipeline</span>
+          </NavLink>
+          <nav className="flex gap-2 text-sm">
+            <NavLink
+              to="/new"
+              className={({ isActive }) =>
+                `rounded-md border px-4 py-2 font-semibold transition-colors ${
+                  isActive
+                    ? "border-[#232b3a] bg-[#141924] text-[#e4e8f0]"
+                    : "border-transparent text-[#6b7690] hover:text-[#e4e8f0]"
+                }`
+              }
+            >
+              + New
+            </NavLink>
             <NavLink
               to="/"
               end
               className={({ isActive }) =>
-                isActive ? "font-medium text-slate-900" : "text-slate-500 hover:text-slate-900"
+                `rounded-md border px-4 py-2 transition-colors ${
+                  isActive
+                    ? "border-[#232b3a] bg-[#141924] text-[#e4e8f0]"
+                    : "border-transparent text-[#6b7690] hover:text-[#e4e8f0]"
+                }`
               }
             >
               Applications
             </NavLink>
-            <NavLink
-              to="/new"
-              className={({ isActive }) =>
-                isActive ? "font-medium text-slate-900" : "text-slate-500 hover:text-slate-900"
-              }
-            >
-              New application
-            </NavLink>
           </nav>
         </div>
       </header>
-      <main className="mx-auto max-w-4xl px-6 py-8">
+      <main className="mx-auto max-w-5xl px-6 py-8">
         <Outlet />
       </main>
     </div>

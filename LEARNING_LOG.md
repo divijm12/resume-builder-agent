@@ -342,4 +342,67 @@ judgment call.
 
 ---
 
+## 9. Redesigning the UI: pick a direction before writing a line of app code
+
+The frontend worked but had zero visual identity — plain white/slate
+Tailwind defaults everywhere. The temptation when asked to "make it
+creative" is to just start changing colors in the React components. Instead
+we did something worth understanding as a general workflow: **mock up the
+actual visual direction somewhere cheap and disposable before touching the
+real app.**
+
+Concretely, three full visual treatments of the same screen ("New
+Application") were built as static HTML files — dark terminal/CI aesthetic,
+warm paper/editorial aesthetic, and a dark analytics-dashboard aesthetic —
+and put on one shared canvas as a Claude Design artifact, a separate
+published page, not committed to the repo. That let you compare three real,
+fully-styled options side by side and just point at the one you wanted
+("C"), instead of me guessing at a palette and you finding out you disliked
+it only after it was wired into working React components. The general
+principle: **when a decision is genuinely subjective and hard to evaluate
+from a text description (an aesthetic, a layout, a wording choice with
+several good options), produce the actual candidates cheaply and let the
+comparison decide it — don't debate it in the abstract.**
+
+Once "C" (dark, `Space Grotesk` + `IBM Plex Mono`, cyan/magenta accents,
+mission-control-style gauges and stat tiles) was chosen, only *then* did we
+touch `review/frontend/`. A few concrete techniques worth knowing from that
+implementation pass:
+
+- **Design tokens as CSS custom properties.** `index.css` now defines
+  `--bg`, `--panel`, `--text`, `--cyan`, etc. once at the top (`:root { ... }`)
+  instead of the same hex codes being retyped in every component. This is
+  the same idea as `master_resume.yaml` being one source of truth instead of
+  scattering resume facts across files — one place to change a color, every
+  usage follows.
+- **An SVG ring as a progress gauge, from math you can actually follow.**
+  The "Avg Match" gauge (`AvgMatchGauge` in `NewApplication.tsx`) isn't an
+  image or a chart library — it's one `<circle>` drawn with
+  `stroke-dasharray` set to its own circumference (`2 * Math.PI * r`) and
+  `stroke-dashoffset` set to `circumference * (1 - pct/100)`. A circle's
+  outline is just a line that happens to loop back on itself;
+  `stroke-dasharray` chops that line into a dash-gap pattern, and setting
+  the dash length equal to the whole circumference with a gap of zero, then
+  *offsetting* where that dash starts, is what makes only part of the ring
+  appear "filled." No new dependency needed for what looks like a
+  data-viz widget.
+- **Don't fabricate data to fill a mockup-inspired layout.** The original
+  design sketch showed a gauge for "the current job's match score" sitting
+  next to the JD textarea — but on the real New Application page, no score
+  exists yet until the pipeline actually runs the scoring stage. Rather than
+  hardcode a fake percentage to match the mockup's look, that tile was
+  repurposed to show your *real* portfolio-wide average match score (pulled
+  live from `listApplications()`). Same visual language, honest data — the
+  same "never fabricate" principle from section 2, just showing up in UI
+  design instead of resume content this time.
+- **Verifying a UI change without spending API credits.** To see the
+  Applications list and the Application Detail page actually populated
+  (not just their empty states), a synthetic row was inserted directly into
+  `applications.db` with `sqlite3` — no pipeline run, no Anthropic API call
+  — then deleted again after the screenshot. Same zero-cost-first instinct
+  as the mocked Python tests used earlier in this project: verify with fake
+  data before ever reaching for a real, paid run.
+
+---
+
 *(more entries added as this project continues)*

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createJob, TAILORING_MODES } from "../api";
+import { createJob, listApplications, TAILORING_MODES, type ApplicationSummary } from "../api";
 import { useJobPolling } from "../hooks/useJobPolling";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -12,10 +12,74 @@ const STAGE_LABELS: Record<string, string> = {
   logging: "Saving to your application history…",
 };
 
-const MODELS = [
-  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5 (cheap, default)" },
-  { value: "claude-sonnet-5", label: "Claude Sonnet 5 (more capable, costs more)" },
+const STAGES: { key: string; label: string }[] = [
+  { key: "ingesting", label: "Ingest" },
+  { key: "scoring", label: "Score" },
+  { key: "tailoring", label: "Tailor" },
+  { key: "rendering", label: "Render" },
+  { key: "logging", label: "Log" },
 ];
+
+const MODELS = [
+  { value: "claude-haiku-4-5", label: "Claude Haiku 4.5", hint: "cheap, default" },
+  { value: "claude-sonnet-5", label: "Claude Sonnet 5", hint: "more capable, costs more" },
+];
+
+function ChevronDown() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8fa0bf" strokeWidth="2.5">
+      <path d="M6 9l6 6 6-6" />
+    </svg>
+  );
+}
+
+function Check() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#0c0f16" strokeWidth="3">
+      <path d="M20 6L9 17l-5-5" />
+    </svg>
+  );
+}
+
+function StatTile({ label, value, accent }: { label: string; value: string; accent?: string }) {
+  return (
+    <div className="rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
+      <div className="mb-2 text-[11px] uppercase tracking-wide text-[#6b7690]">{label}</div>
+      <div className="font-mono text-2xl font-semibold" style={{ color: accent ?? "#e4e8f0" }}>
+        {value}
+      </div>
+    </div>
+  );
+}
+
+function AvgMatchGauge({ pct }: { pct: number | null }) {
+  const r = 54;
+  const circumference = 2 * Math.PI * r;
+  const offset = pct === null ? circumference : circumference * (1 - pct / 100);
+  return (
+    <div className="flex flex-col items-center justify-center rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
+      <div className="relative flex items-center justify-center">
+        <svg width="104" height="104" viewBox="0 0 130 130">
+          <circle cx="65" cy="65" r={r} fill="none" stroke="#1c2431" strokeWidth="10" />
+          <circle
+            cx="65"
+            cy="65"
+            r={r}
+            fill="none"
+            stroke="#4fd6f0"
+            strokeWidth="10"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={offset}
+            transform="rotate(-90 65 65)"
+          />
+        </svg>
+        <div className="absolute font-mono text-xl font-semibold">{pct !== null ? `${pct}%` : "—"}</div>
+      </div>
+      <div className="mt-2 text-[11px] uppercase tracking-wide text-[#6b7690]">Avg Match</div>
+    </div>
+  );
+}
 
 export default function NewApplication() {
   const navigate = useNavigate();
@@ -26,8 +90,15 @@ export default function NewApplication() {
   const [mode, setMode] = useState<"honest" | "aggressive">("aggressive");
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [applications, setApplications] = useState<ApplicationSummary[] | null>(null);
 
   const job = useJobPolling(jobId);
+
+  useEffect(() => {
+    listApplications()
+      .then(setApplications)
+      .catch(() => setApplications([]));
+  }, []);
 
   useEffect(() => {
     if (job?.status === "done" && job.application_id) {
@@ -36,6 +107,24 @@ export default function NewApplication() {
   }, [job, navigate]);
 
   const submitting = jobId !== null && job?.status !== "error";
+  const currentStageIndex = job ? STAGES.findIndex((s) => s.key === job.stage) : -1;
+
+  const stats = applications
+    ? {
+        total: applications.length,
+        avgMatch:
+          applications.filter((a) => a.match_score !== null).length > 0
+            ? Math.round(
+                applications.reduce((sum, a) => sum + (a.match_score ?? 0), 0) /
+                  applications.filter((a) => a.match_score !== null).length,
+              )
+            : null,
+        interviews: applications.filter((a) => a.status === "interview" || a.status === "offer").length,
+        thisWeek: applications.filter(
+          (a) => Date.now() - new Date(a.created_at).getTime() < 7 * 24 * 60 * 60 * 1000,
+        ).length,
+      }
+    : null;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -55,122 +144,191 @@ export default function NewApplication() {
   }
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <h1 className="mb-1 text-2xl font-semibold">New application</h1>
-      <p className="mb-6 text-sm text-slate-500">
-        Paste a job description below. This runs the full pipeline (parse → score → tailor →
-        render) against real Anthropic API credits.
-      </p>
+    <div>
+      {/* stat strip */}
+      <div className="mb-4 grid grid-cols-4 gap-3">
+        <StatTile label="Applications" value={stats ? String(stats.total) : "—"} />
+        <AvgMatchGauge pct={stats?.avgMatch ?? null} />
+        <StatTile label="Interviews" value={stats ? String(stats.interviews) : "—"} />
+        <StatTile
+          label="This Week"
+          value={stats && stats.thisWeek > 0 ? `+${stats.thisWeek}` : stats ? "0" : "—"}
+          accent={stats && stats.thisWeek > 0 ? "#f088c9" : undefined}
+        />
+      </div>
 
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="mb-1 block text-sm font-medium">Job description</label>
-          <textarea
-            required
-            value={jdText}
-            onChange={(e) => setJdText(e.target.value)}
-            disabled={submitting}
-            rows={14}
-            className="w-full rounded-md border border-slate-300 p-3 font-mono text-sm focus:border-slate-500 focus:outline-none disabled:bg-slate-100"
-            placeholder="Paste the full job posting text here…"
-          />
-        </div>
-
-        <div>
-          <label className="mb-1 block text-sm font-medium">Tailoring mode</label>
-          <div className="grid grid-cols-2 gap-3">
-            {TAILORING_MODES.map((m) => (
-              <button
-                key={m.value}
-                type="button"
-                disabled={submitting}
-                onClick={() => setMode(m.value)}
-                className={`rounded-md border p-3 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60 ${
-                  mode === m.value
-                    ? "border-slate-900 bg-slate-50 ring-1 ring-slate-900"
-                    : "border-slate-300 hover:border-slate-400"
-                }`}
-              >
-                <div className="font-medium">{m.label}</div>
-                <div className="mt-0.5 text-xs text-slate-500">{m.description}</div>
-              </button>
-            ))}
-          </div>
-          <p className="mt-1 text-xs text-slate-400">
-            Neither mode ever invents skills, numbers, or experience — "Aggressive" means more
-            rewriting, not less honesty.
-          </p>
-        </div>
-
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Company <span className="text-slate-400">(optional override)</span>
-            </label>
-            <input
-              type="text"
-              value={company}
-              onChange={(e) => setCompany(e.target.value)}
+      <form onSubmit={handleSubmit}>
+        <div className="mb-4 grid grid-cols-[1.6fr_1fr] gap-3">
+          {/* JD card */}
+          <div className="rounded-lg border border-[#1c2431] bg-[#10141d] p-6">
+            <div className="mb-3 flex items-center justify-between">
+              <label className="text-xs uppercase tracking-wide text-[#6b7690]">Job Description</label>
+              <span className="font-mono text-[11px] text-[#4a5468]">{jdText.length.toLocaleString()} chars</span>
+            </div>
+            <textarea
+              required
+              value={jdText}
+              onChange={(e) => setJdText(e.target.value)}
               disabled={submitting}
-              className="w-full rounded-md border border-slate-300 p-2 text-sm disabled:bg-slate-100"
-              placeholder="Auto-extracted from the JD if blank"
+              rows={10}
+              className="mb-4 w-full resize-none rounded-md border border-[#232b3a] bg-[#0c0f16] p-3 text-sm leading-relaxed text-[#b8c0d4] placeholder-[#4a5468] focus:border-[#4fd6f0] focus:outline-none disabled:opacity-60"
+              placeholder="Paste the full job posting text here…"
             />
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-md border border-[#1c2431] bg-[#0c0f16] px-3.5 py-2.5">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-[#4a5468]">
+                  Company <span className="normal-case text-[#3a4356]">(optional)</span>
+                </div>
+                <input
+                  type="text"
+                  value={company}
+                  onChange={(e) => setCompany(e.target.value)}
+                  disabled={submitting}
+                  className="w-full bg-transparent text-sm text-[#e4e8f0] placeholder-[#4a5468] focus:outline-none disabled:opacity-60"
+                  placeholder="Auto-extracted from JD"
+                />
+              </div>
+              <div className="rounded-md border border-[#1c2431] bg-[#0c0f16] px-3.5 py-2.5">
+                <div className="mb-1 text-[10px] uppercase tracking-wide text-[#4a5468]">
+                  Role <span className="normal-case text-[#3a4356]">(optional)</span>
+                </div>
+                <input
+                  type="text"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  disabled={submitting}
+                  className="w-full bg-transparent text-sm text-[#e4e8f0] placeholder-[#4a5468] focus:outline-none disabled:opacity-60"
+                  placeholder="Auto-extracted from JD"
+                />
+              </div>
+            </div>
           </div>
-          <div>
-            <label className="mb-1 block text-sm font-medium">
-              Role <span className="text-slate-400">(optional override)</span>
-            </label>
-            <input
-              type="text"
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              disabled={submitting}
-              className="w-full rounded-md border border-slate-300 p-2 text-sm disabled:bg-slate-100"
-              placeholder="Auto-extracted from the JD if blank"
-            />
-          </div>
-        </div>
 
-        <div>
-          <label className="mb-1 block text-sm font-medium">Model</label>
-          <select
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
-            disabled={submitting}
-            className="w-full rounded-md border border-slate-300 p-2 text-sm disabled:bg-slate-100"
-          >
-            {MODELS.map((m) => (
-              <option key={m.value} value={m.value}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          {/* mode + model */}
+          <div className="flex flex-col gap-3">
+            {TAILORING_MODES.map((m) => {
+              const active = mode === m.value;
+              return (
+                <button
+                  key={m.value}
+                  type="button"
+                  disabled={submitting}
+                  onClick={() => setMode(m.value)}
+                  className={`rounded-lg border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                    active ? "border-[#4fd6f0] bg-[#10202a]" : "border-[#232b3a] bg-[#0c0f16]"
+                  }`}
+                >
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className={`text-sm font-semibold ${active ? "text-[#e4e8f0]" : "text-[#6b7690]"}`}>
+                      {m.label}
+                    </span>
+                    <span
+                      className="relative block h-[18px] w-[34px] rounded-full"
+                      style={{ background: active ? "#4fd6f0" : "#1c2431" }}
+                    >
+                      <span
+                        className="absolute top-[2px] h-[14px] w-[14px] rounded-full"
+                        style={{
+                          background: active ? "#0c0f16" : "#4a5468",
+                          left: active ? "18px" : "2px",
+                        }}
+                      />
+                    </span>
+                  </div>
+                  <div className={`text-xs leading-relaxed ${active ? "text-[#9db3c9]" : "text-[#4a5468]"}`}>
+                    {m.description}
+                  </div>
+                </button>
+              );
+            })}
+
+            <div className="rounded-lg border border-[#232b3a] bg-[#0c0f16] p-4">
+              <div className="mb-2 text-[10px] uppercase tracking-wide text-[#4a5468]">Model</div>
+              <div className="relative">
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  disabled={submitting}
+                  className="w-full appearance-none bg-transparent font-mono text-sm text-[#e4e8f0] focus:outline-none disabled:opacity-60"
+                >
+                  {MODELS.map((m) => (
+                    <option key={m.value} value={m.value} className="bg-[#10141d]">
+                      {m.label} — {m.hint}
+                    </option>
+                  ))}
+                </select>
+                <div className="pointer-events-none absolute right-0 top-1">
+                  <ChevronDown />
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
 
         {submitError && (
-          <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{submitError}</p>
+          <p className="mb-4 rounded-md border border-[#3a1f22] bg-[#1a1013] p-3 text-sm text-[#f87171]">
+            {submitError}
+          </p>
         )}
-
         {job?.status === "error" && (
-          <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">
+          <p className="mb-4 rounded-md border border-[#3a1f22] bg-[#1a1013] p-3 text-sm text-[#f87171]">
             Pipeline failed: {job.error}
           </p>
         )}
 
-        {submitting && job?.status === "running" && (
-          <div className="flex items-center gap-2 rounded-md bg-slate-100 p-3 text-sm text-slate-700">
-            <span className="h-2 w-2 animate-pulse rounded-full bg-slate-500" />
-            {STAGE_LABELS[job.stage] ?? job.stage}
+        {/* pipeline stepper */}
+        <div className="flex items-center gap-7 rounded-lg border border-[#1c2431] bg-[#10141d] px-7 py-6">
+          <div className="relative flex flex-1 items-center justify-between">
+            <div className="absolute left-4 right-4 top-[15px] h-0.5 bg-[#1c2431]" />
+            {submitting && currentStageIndex >= 0 && (
+              <div
+                className="absolute left-4 top-[15px] h-0.5 bg-[#4fd6f0] transition-all"
+                style={{
+                  width: `calc(${(currentStageIndex / (STAGES.length - 1)) * 100}% - ${
+                    currentStageIndex === 0 ? "0px" : "2rem"
+                  } + ${currentStageIndex === STAGES.length - 1 ? "2rem" : "0px"})`,
+                }}
+              />
+            )}
+            {STAGES.map((s, i) => {
+              const done = submitting && currentStageIndex > i;
+              const active = submitting && currentStageIndex === i;
+              return (
+                <div key={s.key} className="z-10 flex flex-col items-center gap-2.5">
+                  <div
+                    className="flex h-[30px] w-[30px] items-center justify-center rounded-full font-mono text-[11px]"
+                    style={{
+                      background: done || active ? (active ? "#f088c9" : "#4fd6f0") : "#1c2431",
+                      color: done || active ? "#0c0f16" : "#4a5468",
+                      boxShadow: active ? "0 0 0 4px rgba(240,136,201,0.15)" : undefined,
+                    }}
+                  >
+                    {done ? <Check /> : i + 1}
+                  </div>
+                  <div
+                    className="text-[11px]"
+                    style={{ color: active ? "#e4e8f0" : done ? "#b8c0d4" : "#4a5468", fontWeight: active ? 600 : 400 }}
+                  >
+                    {s.label}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded-md bg-slate-900 py-2.5 text-sm font-medium text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-400"
-        >
-          {submitting ? "Running…" : "Run pipeline"}
-        </button>
+          <button
+            type="submit"
+            disabled={submitting}
+            className="flex flex-shrink-0 items-center gap-2 rounded-md bg-[#4fd6f0] px-6 py-3 text-sm font-bold text-[#0c0f16] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {submitting ? (job ? (STAGE_LABELS[job.stage] ?? "Running…") : "Starting…") : "Run"}
+            {!submitting && (
+              <svg width="13" height="11" viewBox="0 0 24 24" fill="none" stroke="#0c0f16" strokeWidth="2.5">
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            )}
+          </button>
+        </div>
       </form>
     </div>
   );

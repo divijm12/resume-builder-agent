@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { listApplications, type ApplicationSummary } from "../api";
 
-const STATUS_COLORS: Record<string, string> = {
-  drafted: "bg-slate-100 text-slate-700",
-  applied: "bg-blue-100 text-blue-700",
-  outreach_sent: "bg-indigo-100 text-indigo-700",
-  interview: "bg-amber-100 text-amber-700",
-  offer: "bg-green-100 text-green-700",
-  rejected: "bg-red-100 text-red-700",
-  ghosted: "bg-slate-100 text-slate-500",
+const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
+  drafted: { bg: "#1c2431", text: "#8fa0bf" },
+  applied: { bg: "#10202a", text: "#4fd6f0" },
+  outreach_sent: { bg: "#1a1e3a", text: "#9d9dfa" },
+  interview: { bg: "#2a2410", text: "#f2c94c" },
+  offer: { bg: "#0f2a1e", text: "#4ade80" },
+  rejected: { bg: "#2a1416", text: "#f87171" },
+  ghosted: { bg: "#161a24", text: "#6b7690" },
 };
 
 export default function ApplicationsList() {
@@ -25,60 +25,68 @@ export default function ApplicationsList() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Applications</h1>
+        <h1 className="text-xl font-semibold">Applications</h1>
         <Link
           to="/new"
-          className="rounded-md bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800"
+          className="rounded-md bg-[#4fd6f0] px-4 py-2 text-sm font-bold text-[#0c0f16] transition-opacity hover:opacity-90"
         >
           + New application
         </Link>
       </div>
 
-      {error && <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+      {error && (
+        <p className="rounded-md border border-[#3a1f22] bg-[#1a1013] p-3 text-sm text-[#f87171]">{error}</p>
+      )}
 
       {applications && applications.length === 0 && (
-        <p className="text-sm text-slate-500">
-          No applications yet. Click "New application" to run the pipeline on a job description.
-        </p>
+        <div className="rounded-lg border border-[#1c2431] bg-[#10141d] p-8 text-center text-sm text-[#6b7690]">
+          No applications yet. Click "+ New application" to run the pipeline on a job description.
+        </div>
       )}
 
       {applications && applications.length > 0 && (
-        <table className="w-full overflow-hidden rounded-md border border-slate-200 text-sm">
-          <thead className="bg-slate-100 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
-            <tr>
-              <th className="px-4 py-2">Company</th>
-              <th className="px-4 py-2">Role</th>
-              <th className="px-4 py-2">Date</th>
-              <th className="px-4 py-2">Score</th>
-              <th className="px-4 py-2">Mode</th>
-              <th className="px-4 py-2">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 bg-white">
-            {applications.map((app) => (
-              <tr key={app.id} className="hover:bg-slate-50">
-                <td className="px-4 py-3">
-                  <Link to={`/applications/${app.id}`} className="font-medium text-slate-900 hover:underline">
-                    {app.company}
-                  </Link>
-                </td>
-                <td className="px-4 py-3 text-slate-600">{app.role_title}</td>
-                <td className="px-4 py-3 text-slate-500">{app.created_at.slice(0, 10)}</td>
-                <td className="px-4 py-3 text-slate-600">
-                  {app.match_score !== null ? app.match_score.toFixed(0) : "—"}
-                </td>
-                <td className="px-4 py-3 text-slate-500 capitalize">{app.mode}</td>
-                <td className="px-4 py-3">
-                  <span
-                    className={`rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_COLORS[app.status] ?? "bg-slate-100 text-slate-700"}`}
-                  >
-                    {app.status}
-                  </span>
-                </td>
+        <div className="overflow-hidden rounded-lg border border-[#1c2431]">
+          <table className="w-full text-sm">
+            <thead className="bg-[#10141d] text-left text-[11px] uppercase tracking-wide text-[#6b7690]">
+              <tr>
+                <th className="px-5 py-3 font-medium">Company</th>
+                <th className="px-5 py-3 font-medium">Role</th>
+                <th className="px-5 py-3 font-medium">Date</th>
+                <th className="px-5 py-3 font-medium">Score</th>
+                <th className="px-5 py-3 font-medium">Mode</th>
+                <th className="px-5 py-3 font-medium">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-[#1c2431] bg-[#0c0f16]">
+              {applications.map((app) => {
+                const colors = STATUS_COLORS[app.status] ?? STATUS_COLORS.drafted;
+                return (
+                  <tr key={app.id} className="transition-colors hover:bg-[#10141d]">
+                    <td className="px-5 py-3.5">
+                      <Link to={`/applications/${app.id}`} className="font-medium text-[#e4e8f0] hover:text-[#4fd6f0]">
+                        {app.company}
+                      </Link>
+                    </td>
+                    <td className="px-5 py-3.5 text-[#9db3c9]">{app.role_title}</td>
+                    <td className="px-5 py-3.5 font-mono text-[#6b7690]">{app.created_at.slice(0, 10)}</td>
+                    <td className="px-5 py-3.5 font-mono font-semibold text-[#e4e8f0]">
+                      {app.match_score !== null ? `${app.match_score.toFixed(0)}%` : "—"}
+                    </td>
+                    <td className="px-5 py-3.5 capitalize text-[#6b7690]">{app.mode}</td>
+                    <td className="px-5 py-3.5">
+                      <span
+                        className="rounded-full px-2.5 py-1 text-xs font-medium"
+                        style={{ background: colors.bg, color: colors.text }}
+                      >
+                        {app.status}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );
