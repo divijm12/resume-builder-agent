@@ -246,6 +246,23 @@ def render_docx(tailored_resume: dict, output_path: Path, margin_in: float = 0.4
     _set_font(run, size=Pt(sizes["contact"]))
     p.paragraph_format.space_after = Pt(sizes["contact_space_after"])
 
+    if tailored_resume.get("education"):
+        _add_section_heading(doc, "Education", sizes)
+        for edu in tailored_resume["education"]:
+            _add_heading_row(doc, f"{edu.get('degree', '')} -- {edu.get('institution', '')}", "", sizes, right_tab)
+            if edu.get("honors"):
+                p = doc.add_paragraph()
+                run = p.add_run(edu["honors"])
+                _set_font(run, size=Pt(sizes["small"]))
+
+    if tailored_resume.get("certifications"):
+        _add_section_heading(doc, "Certifications", sizes)
+        for cert in tailored_resume["certifications"]:
+            p = doc.add_paragraph(style="List Bullet")
+            year = f" ({cert['year']})" if cert.get("year") else ""
+            run = p.add_run(f"{cert.get('name', '')}{year}")
+            _set_font(run, size=Pt(sizes["body"]))
+
     if tailored_resume.get("skills"):
         _add_section_heading(doc, "Skills", sizes)
         p = doc.add_paragraph()
@@ -268,23 +285,6 @@ def render_docx(tailored_resume: dict, output_path: Path, margin_in: float = 0.4
             _add_heading_row(doc, left, _format_month_year(proj.get("date", "")), sizes, right_tab)
             for b in proj.get("bullets", []):
                 _add_bullet(doc, b["text"], sizes)
-
-    if tailored_resume.get("education"):
-        _add_section_heading(doc, "Education", sizes)
-        for edu in tailored_resume["education"]:
-            _add_heading_row(doc, f"{edu.get('degree', '')} -- {edu.get('institution', '')}", "", sizes, right_tab)
-            if edu.get("honors"):
-                p = doc.add_paragraph()
-                run = p.add_run(edu["honors"])
-                _set_font(run, size=Pt(sizes["small"]))
-
-    if tailored_resume.get("certifications"):
-        _add_section_heading(doc, "Certifications", sizes)
-        for cert in tailored_resume["certifications"]:
-            p = doc.add_paragraph(style="List Bullet")
-            year = f" ({cert['year']})" if cert.get("year") else ""
-            run = p.add_run(f"{cert.get('name', '')}{year}")
-            _set_font(run, size=Pt(sizes["body"]))
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc.save(str(output_path))
@@ -373,6 +373,21 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
             )
         )
 
+    if tailored_resume.get("education"):
+        section_heading("Education")
+        for edu in tailored_resume["education"]:
+            heading_row(f"{edu.get('degree', '')} -- {edu.get('institution', '')}", "")
+            if edu.get("honors"):
+                story.append(Paragraph(escape(edu["honors"]), styles["small"]))
+
+    if tailored_resume.get("certifications"):
+        section_heading("Certifications")
+        cert_lines = [
+            f"{c.get('name', '')}" + (f" ({c['year']})" if c.get("year") else "")
+            for c in tailored_resume["certifications"]
+        ]
+        bullet_list(cert_lines)
+
     if tailored_resume.get("skills"):
         section_heading("Skills")
         story.append(Paragraph(escape(", ".join(tailored_resume["skills"])), styles["body"]))
@@ -392,21 +407,6 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
             tech = " -- " + " | ".join(proj["tech"]) if proj.get("tech") else ""
             heading_row(f"{proj.get('name', '')}{tech}", _format_month_year(proj.get("date", "")))
             bullet_list([b["text"] for b in proj.get("bullets", [])])
-
-    if tailored_resume.get("education"):
-        section_heading("Education")
-        for edu in tailored_resume["education"]:
-            heading_row(f"{edu.get('degree', '')} -- {edu.get('institution', '')}", "")
-            if edu.get("honors"):
-                story.append(Paragraph(escape(edu["honors"]), styles["small"]))
-
-    if tailored_resume.get("certifications"):
-        section_heading("Certifications")
-        cert_lines = [
-            f"{c.get('name', '')}" + (f" ({c['year']})" if c.get("year") else "")
-            for c in tailored_resume["certifications"]
-        ]
-        bullet_list(cert_lines)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     doc = SimpleDocTemplate(
