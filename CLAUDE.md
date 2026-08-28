@@ -42,6 +42,7 @@ outputs/
 3. **Never scrape LinkedIn profiles for contact info.** Use Hunter.io/Apollo API or direct company website sources only. Flag unverified contacts clearly — don't silently treat them as equal to verified ones.
 4. **Every output is versioned.** Write new files per application into `outputs/<company>_<role>_<date>/`, never overwrite a previous version. Log the application in `applications.db` immediately after generation, not after sending.
 5. **Structured in, structured out.** Every agent stage takes and returns JSON/YAML matching the schemas in `ARCHITECTURE.md`. If a stage needs to change its schema, update `ARCHITECTURE.md` in the same commit.
+6. **Tailoring can never score lower than doing nothing.** `tailor.py` rescores its own output; if that rescore comes in below the untouched master resume's original score, the tailoring is discarded and the full master resume is used unchanged instead. Enforced in code (`tailor_resume`'s guardrail, not a prompt instruction) by falling back to the exact content the original score was measured against — a guarantee, not a best-effort check.
 
 ## Working style
 

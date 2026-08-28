@@ -52,6 +52,14 @@ fine; "Python" appearing out of nowhere is not). Also rejected: stapling a
 text instead of actually rewording it -- prompt-only enforcement of this
 didn't hold reliably across runs, so it's now caught structurally (new text
 == original text + a trailing --/em-dash clause).
+
+Hard rule (user-specified, non-negotiable): tailoring must never leave the
+candidate scoring lower than doing nothing. After rescoring, if
+score_after < score_before, every choice this pass made is discarded and
+tailored_resume falls back to the full, unmodified master resume -- see
+tailor_resume's own guardrail block for why this is a guarantee (falling
+back to the exact content score_before was already measured against) and
+not just a best-effort check.
 """
 
 import argparse
@@ -628,6 +636,34 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
     }
 
 
+def _full_selection_plan(master_resume: dict) -> dict:
+    """A TailoringPlan-shaped dict selecting everything in the master resume,
+    unmodified -- every skill, every experience/project bullet, verbatim. Used
+    only as the score-guardrail fallback below (see tailor_resume): run
+    through validate_and_build in 'honest' mode, which forces bullet text to
+    the original regardless of what a plan proposes, so this reliably
+    reproduces the untouched master resume in tailored_resume's own shape
+    (flattened/relabeled skills list, sorted sections) rather than hand-
+    building that shape separately and risking it drifting out of sync with
+    validate_and_build's actual logic."""
+    return {
+        "selected_skills": [{"master_skill_name": s["name"]} for s in master_resume.get("skills", [])],
+        "experience": [
+            {"id": e["id"], "bullets": [{"id": b["id"], "text": b["text"]} for b in e.get("bullets", [])]}
+            for e in master_resume.get("experience", [])
+        ],
+        "projects": [
+            {"id": p["id"], "bullets": [{"id": b["id"], "text": b["text"]} for b in p.get("bullets", [])]}
+            for p in master_resume.get("projects", [])
+        ],
+        "diff_summary": [],
+        "unaddressed_hard_gaps": [],
+        "unaddressed_red_flags": [],
+        "unaddressed_reword_opportunities": [],
+        "ats_scan_notes": [],
+    }
+
+
 def tailor_resume(
     jd_parsed: dict, score: dict, master_resume: dict, model: str = DEFAULT_MODEL, mode: str = "aggressive"
 ) -> dict:
@@ -661,6 +697,40 @@ def tailor_resume(
     # Rescore the tailored resume with score.py's own scoring logic so the impact
     # of tailoring (or lack of it) is measured, not assumed.
     score_after = score_jd(jd_parsed, result["tailored_resume"], model=model)
+
+    # Hard guardrail (user-specified, non-negotiable): tailoring must never
+    # leave the candidate worse off than doing nothing. If the rescored match
+    # is lower than the master resume's own original score, discard every
+    # tailoring choice this pass made and fall back to the full, unmodified
+    # master resume instead. This is guaranteed to work, not just likely to:
+    # `score` (score_before) was computed against exactly that untouched
+    # content, so falling back to it can never score lower than score_before
+    # -- reusing that number as score_after here (rather than re-scoring the
+    # fallback) is what makes it a guarantee instead of "probably fine": a
+    # fresh rescore is itself an LLM call and could return a slightly
+    # different number for identical content, which would undermine the
+    # guarantee this exists to make.
+    if score_after["overall_score"] < score["overall_score"]:
+        fallback_plan = _full_selection_plan(master_resume)
+        fallback = validate_and_build(fallback_plan, master_resume, mode="honest")
+        result["tailored_resume"] = fallback["tailored_resume"]
+        result["diff_summary"] = [
+            "No changes kept this pass -- the proposed tailoring would have scored "
+            "lower than your resume as-is, so it was discarded and your master "
+            "resume was used unchanged instead."
+        ]
+        result["validation_log"].append(
+            f"Score guardrail triggered: proposed tailoring rescored at "
+            f"{score_after['overall_score']} vs. {score['overall_score']} for the "
+            f"untouched master resume -- reverted to the full master resume "
+            f"unchanged rather than ship a worse-scoring result."
+        )
+        result["unaddressed_hard_gaps"] = score["hard_gaps"]
+        result["unaddressed_red_flags"] = score["red_flags"]
+        result["unaddressed_reword_opportunities"] = score["reword_opportunities"]
+        result["ats_scan_notes"] = []
+        score_after = score
+
     result["score_before"] = score
     result["score_after"] = score_after
     result["overall_score_delta"] = score_after["overall_score"] - score["overall_score"]
