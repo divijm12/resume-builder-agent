@@ -405,4 +405,57 @@ implementation pass:
 
 ---
 
+## 10. A real production bug, and the same lesson showing up a third time
+
+You ran a real job through the dashboard and flagged something that
+"didn't make sense": `diff_summary` said a GeoVerify bullet was reworded
+from "TensorFlow liveness detection" to something generic. Worth walking
+through what was actually going on, because the real bug wasn't where it
+looked.
+
+**What had actually happened, verified by reading the real DB row:** your
+guardrail worked. `validation_log` showed the TensorFlow rewording attempt
+was caught and reverted — the resume you downloaded still said "TensorFlow
+liveness detection," word for word. The *real* bug was that `diff_summary`
+(the text you read) is written by the model as part of the same response
+that proposes the edit, *before* the guardrail code runs on it. So it was
+describing an attempt, not an outcome — two of its three "changes" never
+survived contact with `validate_and_build`, and the summary never found
+out.
+
+**First fix:** stop letting the model narrate specific bullet-wording
+changes in `diff_summary` at all. That kind of claim is exactly the thing
+this file can verify in code (did the text change, did it pass every
+guardrail) — so it's generated from `reworded_by_parent`, a dict built only
+from bullets that actually survived, never from the model's own words.
+Also closed a related regression: the internal ids (`b_003`, `p_008`) were
+leaking into that same field again, so those got barred too, with a code
+backstop stripping/dropping any line one still slips into.
+
+**Then it happened again, in a different shape.** Testing that fix against
+the same real job description, the model obeyed the letter of the new
+rule — no ids anywhere — while still violating the actual point: `"reworded
+the GeoVerify bullet to emphasize data validation..."` names no id, but
+it's still a specific claim about a bullet's wording, and that exact bullet
+had just been reverted by the same guardrail. This is the *exact* pattern
+from section 2, just showing up a level deeper: telling a model "don't do
+X" gets you "doesn't do X in the way I described," not "doesn't do X." So
+the fix couldn't be a better sentence in the prompt — it had to be another
+code check: any `diff_summary` line that both names a project with a
+reverted reword *and* uses a reword-claiming verb ("reworded"/"rewrote")
+gets dropped, while lines that mention the same project for a legitimate
+reason (selection, ordering) survive, because they don't carry that verb.
+
+**Why this is worth internalizing, not just noting:** the fix for "the
+model claims something false" is never "ask it more precisely not to." The
+fix is "make the false claim impossible to say, or make code check every
+claim against ground truth before showing it to anyone." Two layered
+backstops on the same field, both derived from real production failures,
+both verified with a synthetic test *before* spending an API call to
+confirm — that's the same zero-cost-first discipline as every other fix in
+this project, just applied to a bug in the narration layer instead of the
+resume content itself.
+
+---
+
 *(more entries added as this project continues)*
