@@ -20,6 +20,7 @@ import sqlite3
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Callable, Optional
 
 REPO_ROOT = Path(__file__).parent
 sys.path.insert(0, str(REPO_ROOT / "agents"))
@@ -45,19 +46,24 @@ def log_application(
     match_score,
     docx_path: Path,
     diff_summary: list,
+    tailor_result: dict,
 ) -> int:
     """Insert one applications row + one resume_versions row. Called once per
     apply.py run, immediately after rendering -- never after sending, since
-    nothing in this pipeline sends anything (CLAUDE.md hard rule 2)."""
+    nothing in this pipeline sends anything (CLAUDE.md hard rule 2).
+
+    tailor_result_json stores the full tailor_resume() output (tailored
+    resume, diff_summary, unaddressed_*, ats_scan_notes, score_before/after)
+    so a review UI can show gaps/diffs without re-deriving anything."""
     conn = sqlite3.connect(str(db_path))
     try:
         cur = conn.execute(
             """
             INSERT INTO applications
-                (company, role_title, jd_raw, jd_parsed_json, match_score, resume_variant_path)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (company, role_title, jd_raw, jd_parsed_json, match_score, resume_variant_path, tailor_result_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (company, role_title, jd_raw, json.dumps(jd_parsed), match_score, str(docx_path)),
+            (company, role_title, jd_raw, json.dumps(jd_parsed), match_score, str(docx_path), json.dumps(tailor_result)),
         )
         application_id = cur.lastrowid
         conn.execute(
@@ -82,11 +88,25 @@ def run_pipeline(
     outputs_dir: Path = Path("outputs"),
     db_path: Path = Path("data/applications.db"),
     resume_path: Path = Path("data/master_resume.yaml"),
+    progress_callback: Optional[Callable[[str], None]] = None,
 ) -> dict:
+    """progress_callback, if given, is called with a stage name
+    ("ingesting"/"scoring"/"tailoring"/"rendering"/"logging") right before
+    each stage starts -- CLI usage passes none, so behavior there is
+    unchanged. This is how a caller (e.g. a web backend) can report live
+    progress on a run that takes several sequential API calls."""
+
+    def report(stage: str):
+        if progress_callback:
+            progress_callback(stage)
+
     master_resume = yaml.safe_load(resume_path.read_text())
 
+    report("ingesting")
     jd_parsed = ingest_jd(jd_text, model=model)
+    report("scoring")
     score = score_jd(jd_parsed, master_resume, model=model)
+    report("tailoring")
     tailored = tailor_resume(jd_parsed, score, master_resume, model=model)
 
     company = company_override or jd_parsed.get("company") or "UnknownCompany"
@@ -101,12 +121,14 @@ def run_pipeline(
     name_part = f"{_slug(first)}_{_slug(last)}" if last else _slug(first)
     file_base = f"{name_part}_{_slug(company)}_{_slug(role)}"
 
+    report("rendering")
     layout = find_one_page_layout(tailored["tailored_resume"])
     docx_path = output_dir / f"{file_base}.docx"
     pdf_path = output_dir / f"{file_base}.pdf"
     render_docx(tailored["tailored_resume"], docx_path, margin_in=layout["margin_in"], scale=layout["scale"])
     render_pdf(tailored["tailored_resume"], pdf_path, margin_in=layout["margin_in"], scale=layout["scale"])
 
+    report("logging")
     application_id = log_application(
         db_path,
         company=company,
@@ -116,6 +138,7 @@ def run_pipeline(
         match_score=tailored["score_after"]["overall_score"],
         docx_path=docx_path,
         diff_summary=tailored["diff_summary"],
+        tailor_result=tailored,
     )
 
     return {
