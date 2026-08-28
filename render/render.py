@@ -347,6 +347,13 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
             [[Paragraph(escape(left), styles["bold_row"]), Paragraph(escape(right), styles["date_row"])]],
             colWidths=[(usable - 1.7) * inch, 1.7 * inch],
         )
+        # reportlab Tables default to hAlign='CENTER' -- any tiny mismatch between
+        # `usable` above and the frame's actual computed width then shifts the
+        # whole table left/right relative to plain (non-Table) paragraphs like
+        # section headings and bullets, which always start flush at the frame
+        # edge. Pin it explicitly so every heading_row lines up with everything
+        # else regardless of that rounding, for any resume's content.
+        t.hAlign = "LEFT"
         t.setStyle(
             TableStyle(
                 [
