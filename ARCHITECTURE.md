@@ -80,8 +80,8 @@ Each stage = one Claude Code subagent / skill with a narrow job.
 
 ### Stage 1 — Scoring
 **In:** `jd_parsed.json` + `master_resume.yaml`
-**Out:** `{overall_score, matched_skills[], missing_skills[], reword_opportunities[], hard_gaps[]}`
-**Notes:** Separate "gaps you can reword toward" from "gaps you genuinely don't have" — don't let the tailoring stage paper over the second kind.
+**Out:** `{overall_score, matched_skills[], missing_skills[], reword_opportunities[], hard_gaps[], top_missing_keywords[] (max 5), red_flags[] (max 3)}`
+**Notes:** Separate "gaps you can reword toward" from "gaps you genuinely don't have" — don't let the tailoring stage paper over the second kind. Prompted with a senior-recruiter persona: score + gaps as before, plus a fast hiring-manager read (`top_missing_keywords`, `red_flags`) for a quick gut-check before the full tailoring pass.
 
 ### Stage 2 — Tailoring
 **In:** scoring output + master resume
