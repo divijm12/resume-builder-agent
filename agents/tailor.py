@@ -18,12 +18,17 @@ master_skill_name (a JD-matching display_as relabel of that same skill is
 allowed -- e.g. "LLM agent development" shown as "Agentic AI solutions" --
 but the underlying skill must be real), and reworded bullet text is rejected
 (reverted to the original) if it introduces a number that wasn't in the
-source bullet, drops a named technology/vendor term (from that project's
-`tech` list) that was present in the original bullet, or adds a technology/
-skill name from anywhere in the master resume's vocabulary that wasn't
-already in that specific bullet -- unless it's a textual expansion of
+source bullet, drops a named technology/skill term (from the master
+resume's full vocabulary -- all skill names plus every project's `tech`
+list, not just that bullet's own project) that was present in the original
+bullet, or adds a technology/skill name from that same vocabulary that
+wasn't already in that specific bullet -- unless it's a textual expansion of
 something already there (e.g. "Claude API" -> "Anthropic Claude API" is
-fine; "Python" appearing out of nowhere is not).
+fine; "Python" appearing out of nowhere is not). Also rejected: stapling a
+"-- demonstrating X" / "-- applying Y" clause onto the end of the original
+text instead of actually rewording it -- prompt-only enforcement of this
+didn't hold reliably across runs, so it's now caught structurally (new text
+== original text + a trailing --/em-dash clause).
 """
 
 import argparse
@@ -170,6 +175,25 @@ def _numeric_tokens(text: str) -> set:
     return set(NUMERIC_TOKEN_RE.findall(text))
 
 
+def _date_rank(date_str) -> float:
+    """Higher = more recent. 'present'/'Present' ranks above any fixed date
+    (still ongoing now); 'YYYY' or 'YYYY-MM' parses to a comparable numeric
+    value; empty/unparseable sorts last. Used to sort every dated section
+    (experience, projects, education, certifications) deterministically in
+    code rather than trusting the model's selection order for chronology."""
+    if not date_str:
+        return float("-inf")
+    s = str(date_str).strip().lower()
+    if s == "present":
+        return float("inf")
+    m = re.match(r"^(\d{4})(?:-(\d{1,2}))?$", s)
+    if m:
+        year = int(m.group(1))
+        month = int(m.group(2)) if m.group(2) else 1
+        return year * 12 + month
+    return float("-inf")
+
+
 def _contains_term(text: str, term: str) -> bool:
     """Whole-word/phrase, case-insensitive containment check."""
     prefix = r"\b" if term[0].isalnum() else ""
@@ -186,10 +210,25 @@ def _is_expansion(term: str, original_text: str) -> bool:
     return any(w in original_lower for w in words)
 
 
+def _has_appended_clause(original: str, new_text: str) -> bool:
+    """True if new_text is exactly the original with a trailing --/em-dash clause
+    stapled onto the end -- the structural signature of the 'demonstrating X'
+    antipattern (asserting an unearned capability instead of actually rewording
+    the sentence). Prompt-only enforcement of this didn't hold reliably across
+    runs, but the shape is mechanical enough to catch deterministically."""
+    orig_core = original.rstrip().rstrip(".").rstrip()
+    if not new_text.startswith(orig_core):
+        return False
+    remainder = new_text[len(orig_core):].lstrip()
+    return remainder.startswith("--") or remainder.startswith("—") or remainder.startswith("-")
+
+
 def _known_terms(master_resume: dict) -> set:
-    """All skill names and project tech names -- the vocabulary a reworded bullet
-    is allowed to newly mention, and only when it's an expansion of something
-    already in that bullet (see _is_expansion)."""
+    """All skill names and every project's tech names, globally (not scoped to a
+    single project or bullet) -- protects a term from being dropped out of any
+    bullet that already mentions it, and gates what a reworded bullet is allowed
+    to newly mention (only as an expansion of something already there -- see
+    _is_expansion)."""
     terms = {s["name"] for s in master_resume.get("skills", [])}
     for proj in master_resume.get("projects", []):
         terms.update(proj.get("tech", []))
@@ -221,12 +260,11 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
     known_terms = _known_terms(master_resume)
     exp_by_id = {e["id"]: e for e in master_resume.get("experience", [])}
     proj_by_id = {p["id"]: p for p in master_resume.get("projects", [])}
-    master_exp_order = [e["id"] for e in master_resume.get("experience", [])]
 
     warnings = []
     actually_reworded_ids = []
 
-    def resolve_bullets(selected_bullets, valid_ids_for_parent, protected_terms=frozenset()):
+    def resolve_bullets(selected_bullets, valid_ids_for_parent):
         resolved = []
         for sb in selected_bullets:
             if sb["id"] not in bullet_text or sb["id"] not in valid_ids_for_parent:
@@ -234,9 +272,13 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
                 continue
             original = bullet_text[sb["id"]]
             new_text = sb["text"]
+            # Same global vocabulary (all skill names + all projects' tech) protects
+            # against both directions, for every bullet -- experience included, not
+            # just project bullets. A term only "counts" as dropped if it's an exact
+            # word/phrase match in the original, so unrelated prose can't false-positive.
             dropped_terms = [
-                t for t in protected_terms
-                if t.lower() in original.lower() and t.lower() not in new_text.lower()
+                t for t in known_terms
+                if _contains_term(original, t) and not _contains_term(new_text, t)
             ]
             added_terms = [
                 t for t in known_terms
@@ -247,6 +289,13 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
                 warnings.append(
                     f"Reworded text for bullet '{sb['id']}' introduced a number not in "
                     f"the original -- reverted to original text."
+                )
+                resolved.append({"id": sb["id"], "text": original})
+            elif _has_appended_clause(original, new_text):
+                warnings.append(
+                    f"Reworded text for bullet '{sb['id']}' stapled a 'demonstrating X' "
+                    f"style clause onto the end instead of actually rewording -- reverted "
+                    f"to original text."
                 )
                 resolved.append({"id": sb["id"], "text": original})
             elif dropped_terms:
@@ -269,19 +318,21 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
                 resolved.append({"id": sb["id"], "text": new_text})
         return resolved
 
-    tailored_experience_by_id = {}
+    tailored_experience = []
     for se in plan["experience"]:
         exp = exp_by_id.get(se["id"])
         if exp is None:
             warnings.append(f"Dropped unknown experience id '{se['id']}'.")
             continue
         valid_ids = {b["id"] for b in exp["bullets"]}
-        tailored_experience_by_id[se["id"]] = {
+        tailored_experience.append({
             **{k: v for k, v in exp.items() if k != "bullets"},
             "bullets": resolve_bullets(se["bullets"], valid_ids),
-        }
-    # Keep original chronological order regardless of what order the model returned.
-    tailored_experience = [tailored_experience_by_id[eid] for eid in master_exp_order if eid in tailored_experience_by_id]
+        })
+    # Reverse-chronological order, by end date (or start if ongoing/no end) --
+    # enforced in code regardless of what order the model returned, per user
+    # instruction that every section is strictly chronological.
+    tailored_experience.sort(key=lambda e: _date_rank(e.get("end") or e.get("start")), reverse=True)
 
     tailored_projects = []
     for sp in plan["projects"]:
@@ -290,12 +341,12 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
             warnings.append(f"Dropped unknown project id '{sp['id']}'.")
             continue
         valid_ids = {b["id"] for b in proj["bullets"]}
-        protected_terms = set(proj.get("tech", []))
         tailored_projects.append({
             **{k: v for k, v in proj.items() if k != "bullets"},
-            "bullets": resolve_bullets(sp["bullets"], valid_ids, protected_terms=protected_terms),
+            "bullets": resolve_bullets(sp["bullets"], valid_ids),
         })
-    # Projects keep the model's relevance-ranked order (unlike experience, not chronological).
+    # Reverse-chronological by the project's single `date` field.
+    tailored_projects.sort(key=lambda p: _date_rank(p.get("date")), reverse=True)
 
     selected_skills = []
     relabeled_skills = []
@@ -328,13 +379,24 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
     else:
         warnings.append("All reword_opportunities from the score input were addressed this pass.")
 
+    tailored_education = sorted(
+        master_resume.get("education", []),
+        key=lambda e: _date_rank(e.get("end") or e.get("start")),
+        reverse=True,
+    )
+    tailored_certifications = sorted(
+        master_resume.get("certifications", []),
+        key=lambda c: _date_rank(c.get("year")),
+        reverse=True,
+    )
+
     tailored_resume = {
         "basics": master_resume["basics"],
         "skills": selected_skills,
         "experience": tailored_experience,
         "projects": tailored_projects,
-        "education": master_resume.get("education", []),
-        "certifications": master_resume.get("certifications", []),
+        "education": tailored_education,
+        "certifications": tailored_certifications,
     }
 
     return {

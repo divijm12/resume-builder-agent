@@ -22,7 +22,15 @@ searched for using the PDF render as ground truth (reportlab reports exact
 page count; docx has no accessible pagination info without an actual
 rendering engine) and the winning (margin, scale) is applied to both --
 so the docx fit is a close estimate calibrated off the PDF, not
-independently verified.
+independently verified. Both use Calibri -- docx by font-name reference
+(relies on the reader having it installed); pdf by embedding the actual TTF
+files bundled with this machine's Microsoft Word install, since a PDF needs
+real font data, not just a name (falls back to Helvetica with a printed
+warning if no Calibri file is found).
+
+Section ordering (experience, projects, education, certifications) is
+strictly reverse-chronological -- enforced in tailor.py by parsing each
+entry's date field(s), not left to the model's own ordering choice.
 
 Unlike agents/*.py, this stage does write files -- that's its job. Agents
 stay pure (JSON in, JSON out); render/ and review/ are the persistence layer
@@ -56,15 +64,82 @@ LAYOUT_CANDIDATES = [
 ]
 
 
+MONTH_ABBR = {
+    1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+    7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec",
+}
+
+
+def _format_month_year(date_str):
+    """'2024-05' -> 'May 2024'; '2025' stays '2025' (no month to abbreviate);
+    'present' -> 'Present'; anything else passes through unchanged."""
+    if not date_str:
+        return ""
+    s = str(date_str).strip()
+    if s.lower() == "present":
+        return "Present"
+    m = re.match(r"^(\d{4})-(\d{1,2})$", s)
+    if m:
+        year, month = int(m.group(1)), int(m.group(2))
+        abbr = MONTH_ABBR.get(month)
+        return f"{abbr} {year}" if abbr else s
+    return s
+
+
 def _format_dates(start, end):
     if not start:
         return ""
-    end_label = "Present" if end == "present" else end
-    return f"{start} -- {end_label}" if end_label else start
+    start_label = _format_month_year(start)
+    end_label = _format_month_year(end)
+    return f"{start_label} -- {end_label}" if end_label else start_label
 
 
 def _slug(s: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "_", s).strip("_")
+
+
+# (regular, bold) TTF paths to try, in order -- bundled with Microsoft Word on
+# this machine. reportlab needs an actual embedded font file for the PDF;
+# unlike docx, a font *name* alone isn't enough since PDF viewers don't
+# substitute installed system fonts the way Word does.
+CALIBRI_CANDIDATES = [
+    (
+        "/Applications/Microsoft Word.app/Contents/Resources/DFonts/Calibri.ttf",
+        "/Applications/Microsoft Word.app/Contents/Resources/DFonts/Calibrib.ttf",
+    ),
+    ("/Library/Fonts/Calibri.ttf", "/Library/Fonts/Calibrib.ttf"),
+    (str(Path.home() / "Library/Fonts/Calibri.ttf"), str(Path.home() / "Library/Fonts/Calibrib.ttf")),
+]
+
+_calibri_registered = None  # cached (regular_font_name, bold_font_name) after first lookup
+
+
+def _register_calibri_fonts():
+    """Register real Calibri TTFs with reportlab if found on this machine, so
+    the PDF uses actual Calibri glyphs. Falls back to Helvetica with a printed
+    warning if no Calibri file is found -- never silently swaps fonts without
+    saying so. docx is unaffected either way (font-by-name, not embedded)."""
+    global _calibri_registered
+    if _calibri_registered is not None:
+        return _calibri_registered
+
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    for regular_path, bold_path in CALIBRI_CANDIDATES:
+        if Path(regular_path).exists() and Path(bold_path).exists():
+            pdfmetrics.registerFont(TTFont("Calibri", regular_path))
+            pdfmetrics.registerFont(TTFont("Calibri-Bold", bold_path))
+            _calibri_registered = ("Calibri", "Calibri-Bold")
+            return _calibri_registered
+
+    print(
+        "Warning: no Calibri font file found on this machine -- PDF falling back to "
+        "Helvetica. docx is unaffected (uses Calibri by name).",
+        file=sys.stderr,
+    )
+    _calibri_registered = ("Helvetica", "Helvetica-Bold")
+    return _calibri_registered
 
 
 def _split_name(full_name: str):
@@ -190,7 +265,7 @@ def render_docx(tailored_resume: dict, output_path: Path, margin_in: float = 0.4
         for proj in tailored_resume["projects"]:
             tech = " -- " + " | ".join(proj["tech"]) if proj.get("tech") else ""
             left = f"{proj.get('name', '')}{tech}"
-            _add_heading_row(doc, left, proj.get("date", ""), sizes, right_tab)
+            _add_heading_row(doc, left, _format_month_year(proj.get("date", "")), sizes, right_tab)
             for b in proj.get("bullets", []):
                 _add_bullet(doc, b["text"], sizes)
 
@@ -240,15 +315,17 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
     def sz(base):
         return base * scale
 
+    regular_font, bold_font = _register_calibri_fonts()
+
     styles = {
-        "name": ParagraphStyle("name", fontName="Helvetica-Bold", fontSize=sz(20), leading=sz(24), alignment=TA_CENTER, spaceAfter=2 * scale),
-        "contact": ParagraphStyle("contact", fontName="Helvetica", fontSize=sz(9.5), leading=sz(12), alignment=TA_CENTER, spaceAfter=6 * scale),
-        "section": ParagraphStyle("section", fontName="Helvetica-Bold", fontSize=sz(12), leading=sz(14), spaceBefore=10 * scale, spaceAfter=2 * scale),
-        "body": ParagraphStyle("body", fontName="Helvetica", fontSize=sz(10.5), leading=sz(13)),
-        "bold_row": ParagraphStyle("bold_row", fontName="Helvetica-Bold", fontSize=sz(10.5), leading=sz(13)),
-        "date_row": ParagraphStyle("date_row", fontName="Helvetica", fontSize=sz(9.5), leading=sz(13), alignment=TA_RIGHT),
-        "bullet": ParagraphStyle("bullet", fontName="Helvetica", fontSize=sz(10.5), leading=sz(13)),
-        "small": ParagraphStyle("small", fontName="Helvetica", fontSize=sz(9.5), leading=sz(12)),
+        "name": ParagraphStyle("name", fontName=bold_font, fontSize=sz(20), leading=sz(24), alignment=TA_CENTER, spaceAfter=2 * scale),
+        "contact": ParagraphStyle("contact", fontName=regular_font, fontSize=sz(9.5), leading=sz(12), alignment=TA_CENTER, spaceAfter=6 * scale),
+        "section": ParagraphStyle("section", fontName=bold_font, fontSize=sz(12), leading=sz(14), spaceBefore=10 * scale, spaceAfter=2 * scale),
+        "body": ParagraphStyle("body", fontName=regular_font, fontSize=sz(10.5), leading=sz(13)),
+        "bold_row": ParagraphStyle("bold_row", fontName=bold_font, fontSize=sz(10.5), leading=sz(13)),
+        "date_row": ParagraphStyle("date_row", fontName=regular_font, fontSize=sz(9.5), leading=sz(13), alignment=TA_RIGHT),
+        "bullet": ParagraphStyle("bullet", fontName=regular_font, fontSize=sz(10.5), leading=sz(13)),
+        "small": ParagraphStyle("small", fontName=regular_font, fontSize=sz(9.5), leading=sz(12)),
     }
 
     story = []
@@ -287,7 +364,10 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
     def bullet_list(items):
         story.append(
             ListFlowable(
-                [ListItem(Paragraph(escape(b), styles["bullet"]), spaceAfter=3 * scale) for b in items],
+                [
+                    ListItem(Paragraph(escape(b), styles["bullet"]), spaceAfter=3 * scale, bulletFontName=regular_font)
+                    for b in items
+                ],
                 bulletType="bullet",
                 leftIndent=14,
             )
@@ -310,7 +390,7 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
         section_heading("Projects")
         for proj in tailored_resume["projects"]:
             tech = " -- " + " | ".join(proj["tech"]) if proj.get("tech") else ""
-            heading_row(f"{proj.get('name', '')}{tech}", proj.get("date", ""))
+            heading_row(f"{proj.get('name', '')}{tech}", _format_month_year(proj.get("date", "")))
             bullet_list([b["text"] for b in proj.get("bullets", [])])
 
     if tailored_resume.get("education"):
