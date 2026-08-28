@@ -3,8 +3,12 @@
 
 Pure function: jd_parsed.json + score.json + master_resume.yaml in,
 {tailored_resume, diff_summary, unaddressed_hard_gaps, unaddressed_red_flags,
-ats_scan_notes} JSON out. No file writes, no DB writes -- orchestration/
+unaddressed_reword_opportunities, ats_scan_notes, score_before, score_after,
+overall_score_delta} JSON out. No file writes, no DB writes -- orchestration/
 persistence happens one layer up.
+Rescores the tailored resume with score.py's own scoring function (same
+recruiter-persona prompt) so the impact of tailoring is visible, not assumed
+-- this means every run makes two model calls, not one.
 
 Hard rule (CLAUDE.md): may only select, reorder, and lightly reword bullets
 that already exist in master_resume.yaml -- never invent a bullet, metric, or
@@ -32,6 +36,8 @@ import anthropic
 import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel
+
+from score import score_jd
 
 load_dotenv()
 
@@ -74,14 +80,24 @@ SYSTEM_PROMPT = (
     "changing, deleting, or adding to its facts, use the original text "
     "unchanged.\n\n"
     "Select and order skills and bullets to foreground what matches this JD. "
-    "Prioritize bullets/skills the score input flagged as matched or as a "
-    "reword_opportunity. Then specifically check top_missing_keywords and "
-    "red_flags from the score input, in that priority order: for each one, if "
-    "the master resume genuinely covers it somewhere (even under different "
-    "wording), make sure a selected/reworded bullet surfaces it in this JD's "
-    "terminology; if the resume has no real coverage for it, do not fake "
-    "coverage -- list that keyword/red flag back out in unaddressed_hard_gaps "
-    "or unaddressed_red_flags instead of hiding it.\n\n"
+    "Every single item in the score input's reword_opportunities list MUST be "
+    "addressed in this pass -- via a skill relabel, a reworded bullet, or "
+    "reordering that surfaces it. These are called reword_opportunities and not "
+    "hard_gaps specifically because score.py already determined the master "
+    "resume genuinely covers each one -- so there is always a safe, grounded "
+    "way to surface it, and skipping one without a documented reason is a "
+    "miss, not caution. Go through the list one item at a time; for each, make "
+    "the change, then note it in diff_summary. If -- and only if -- you "
+    "inspect one closely and it genuinely cannot be surfaced without breaking "
+    "a rule above, put it in unaddressed_reword_opportunities with the "
+    "specific reason; this field should normally end up empty. Then "
+    "separately check top_missing_keywords and red_flags from the score "
+    "input, in that priority order: for each one, if the master resume "
+    "genuinely covers it somewhere (even under different wording), make sure "
+    "a selected/reworded bullet surfaces it in this JD's terminology; if the "
+    "resume has no real coverage for it, do not fake coverage -- list that "
+    "keyword/red flag back out in unaddressed_hard_gaps or "
+    "unaddressed_red_flags instead of hiding it.\n\n"
     "Each selected skill must be anchored to a real master_skill_name from the "
     "master resume -- you cannot invent a skill from nothing. But you MAY set "
     "display_as to a JD-matching relabel of that same skill when it's "
@@ -146,6 +162,7 @@ class TailoringPlan(BaseModel):
     diff_summary: List[str]
     unaddressed_hard_gaps: List[str]
     unaddressed_red_flags: List[str]
+    unaddressed_reword_opportunities: List[str]
     ats_scan_notes: List[str]
 
 
@@ -303,6 +320,13 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
         warnings.append("No bullet text was changed from the master resume -- all selected bullets kept verbatim.")
     if relabeled_skills:
         warnings.append(f"Skills relabeled from their master resume name: {relabeled_skills}")
+    if plan["unaddressed_reword_opportunities"]:
+        warnings.append(
+            f"reword_opportunities NOT addressed this pass (should normally be empty): "
+            f"{plan['unaddressed_reword_opportunities']}"
+        )
+    else:
+        warnings.append("All reword_opportunities from the score input were addressed this pass.")
 
     tailored_resume = {
         "basics": master_resume["basics"],
@@ -318,6 +342,7 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
         "diff_summary": plan["diff_summary"] + warnings,
         "unaddressed_hard_gaps": plan["unaddressed_hard_gaps"],
         "unaddressed_red_flags": plan["unaddressed_red_flags"],
+        "unaddressed_reword_opportunities": plan["unaddressed_reword_opportunities"],
         "ats_scan_notes": plan["ats_scan_notes"],
     }
 
@@ -339,7 +364,15 @@ def tailor_resume(jd_parsed: dict, score: dict, master_resume: dict, model: str 
         output_format=TailoringPlan,
     )
     plan = response.parsed_output.model_dump()
-    return validate_and_build(plan, master_resume)
+    result = validate_and_build(plan, master_resume)
+
+    # Rescore the tailored resume with score.py's own scoring logic so the impact
+    # of tailoring (or lack of it) is measured, not assumed.
+    score_after = score_jd(jd_parsed, result["tailored_resume"], model=model)
+    result["score_before"] = score
+    result["score_after"] = score_after
+    result["overall_score_delta"] = score_after["overall_score"] - score["overall_score"]
+    return result
 
 
 def main():
