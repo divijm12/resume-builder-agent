@@ -231,4 +231,75 @@ prettier client than the one we've been using.
 
 ---
 
-*(more entries added as we build the frontend)*
+## 7. React, from first principles (components, state, props, routing)
+
+The backend was the logic; the frontend (`review/frontend/`) is purely
+about *showing* that logic to a human and reacting to clicks. A few core
+ideas, each grounded in a real file we just wrote:
+
+**A component is a function that returns UI.** `NewApplication`,
+`ApplicationsList`, `ApplicationDetail` — each is just a normal
+TypeScript function that returns a description of what should appear on
+screen, written in a syntax called **JSX** that looks like HTML mixed
+into JavaScript (`<h1>Applications</h1>` inside a `.tsx` file). React's
+job is turning that description into actual DOM elements in the browser,
+and — critically — *re-running* the function and updating only what
+changed whenever the data it depends on changes. You never manually
+write `document.getElementById(...).innerText = ...` anywhere in this
+codebase; you just describe what the UI should look like for the current
+data, and React keeps the screen in sync.
+
+**State is a component's own memory.** `useState` (e.g. `const [jdText,
+setJdText] = useState("")` in `NewApplication.tsx`) gives a component a
+piece of data it owns and can change. Calling `setJdText(newValue)` does
+two things: updates the stored value, *and* tells React "re-run this
+component's function, something changed." That's the entire mechanism
+by which typing in the textarea makes the textarea show what you typed —
+every keystroke calls `setJdText`, which triggers a re-render with the
+new value.
+
+**Props are how a parent hands data down to a child.** `Pills({items,
+tone})` in `ApplicationDetail.tsx` is a small component that takes data
+from its caller (`<Pills items={tr.unaddressed_hard_gaps} tone="red" />`)
+and renders it — it has no idea where `items` came from, it just displays
+whatever it's given. This is how the same `Pills` component renders hard
+gaps in red and matched skills in green elsewhere on the same page — one
+reusable piece of UI, configured differently by whoever uses it.
+
+**`useEffect` is for "do this side effect when X happens," not for
+rendering.** Fetching data from our backend is a side effect (it reaches
+outside the component, over the network) — you can't just call `fetch()`
+directly inside the component function, because that function re-runs on
+every render and would refire the request constantly. `useEffect(() => {
+listApplications().then(setApplications) }, [])` says "run this once,
+right after the first render" (the empty `[]` is the key — it means "no
+inputs to watch, so only run once"). Our polling hook
+(`useJobPolling.ts`) is the same idea with a twist: its effect sets up a
+`setInterval` that keeps firing every 1.5s until the job is done, and
+`useEffect`'s cleanup function (the part returned at the end) is what
+stops that interval when the component using it goes away — otherwise
+you'd leak a timer that keeps trying to update a page that no longer
+exists.
+
+**Routing is just "which component do I show for this URL."**
+`react-router-dom`'s `<Routes>` in `main.tsx` maps URL paths to
+components: `/` → `ApplicationsList`, `/new` → `NewApplication`,
+`/applications/:id` → `ApplicationDetail` (the `:id` part is a
+placeholder — `useParams()` inside that component reads back whatever
+was actually in the URL, e.g. `1` from `/applications/1`). Clicking a
+`<Link to="/new">` doesn't reload the page from the server the way a
+normal `<a href>` would — it just swaps which component is rendered,
+instantly, which is why the whole app feels instant to navigate despite
+being "just" a webpage.
+
+**Why TypeScript on top of this:** every function above has typed
+inputs/outputs (`api.ts` defines `interface ApplicationDetail`, etc.), so
+if the backend's JSON shape and the frontend's expectations ever drift
+apart, you get a compiler error pointing at the exact mismatch instead of
+a blank page and a silent `undefined` at runtime. We ran `npx tsc
+--noEmit` before ever starting a dev server specifically to catch that
+class of bug for free, before spending a single API call testing it live.
+
+---
+
+*(more entries added as this project continues)*

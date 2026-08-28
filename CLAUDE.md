@@ -11,6 +11,7 @@ A personal job-application pipeline: paste a JD → score against my resume → 
 apply.py                   # orchestrator: ingest -> score -> tailor -> render -> log
 data/
   master_resume.yaml       # source of truth, structured, tagged bullets
+  schema.sql                # versioned applications.db schema (the .db itself is gitignored)
   applications.db          # SQLite — one row per application
 agents/
   ingest_jd.py
@@ -23,7 +24,9 @@ render/
   render.py                # builds docx (python-docx) + pdf (reportlab) programmatically,
                             # no template file -- see ARCHITECTURE.md Stage 3
 review/
-  cli.py                   # review queue -- not yet built (Phase 5)
+  backend/
+    main.py                 # FastAPI: wraps apply.py's pipeline as a REST API + job polling
+  frontend/                 # React (Vite + TS + Tailwind): paste-JD-to-review web UI
 outputs/
   <company>_<role>_<date>/
     <Firstname>_<Lastname>_<Company>_<Role>.docx
@@ -53,4 +56,5 @@ outputs/
 - `python agents/score.py --jd-json path/to/jd_parsed.json` — Stage 1 alone
 - `python agents/tailor.py --jd-json ... --score-json ...` — Stage 2 alone
 - `python render/render.py --tailored-json ... --company ... --role ...` — Stage 3 alone
-- `python review/cli.py` — open the review queue (not yet built)
+- `cd review/backend && uvicorn main:app --reload --port 8000` — start the review API (needs `.env` at repo root)
+- `cd review/frontend && npm run dev` — start the review web UI (http://localhost:5173), needs the backend running
