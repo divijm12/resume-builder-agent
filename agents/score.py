@@ -189,7 +189,12 @@ def score_jd(jd_parsed: dict, master_resume: dict, model: str = DEFAULT_MODEL) -
     )
     response = client.messages.parse(
         model=model,
-        max_tokens=4096,
+        # Bumped alongside tailor.py's max_tokens after a real Sonnet run
+        # truncated mid-response there -- ScoreResult is smaller (no bullet
+        # text echoed back) so less exposed, but keep headroom consistent
+        # across every call in the pipeline rather than wait for this one to
+        # fail too.
+        max_tokens=8192,
         system=SYSTEM_PROMPT,
         messages=[{"role": "user", "content": user_content}],
         output_format=ScoreResult,

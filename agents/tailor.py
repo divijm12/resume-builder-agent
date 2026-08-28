@@ -686,7 +686,14 @@ def tailor_resume(
     )
     response = client.messages.parse(
         model=model,
-        max_tokens=8000,
+        # TailoringPlan echoes every selected bullet's full text back (even
+        # unchanged ones) plus diff_summary/ats_scan_notes narration -- 8000
+        # was sized against Haiku's typically terser output and truncated a
+        # real Sonnet response mid-string (Invalid JSON: EOF while parsing a
+        # string), failing the whole run after two paid calls already spent.
+        # 16000 leaves real headroom for a more verbose model without being
+        # unbounded.
+        max_tokens=16000,
         system=_system_prompt(mode),
         messages=[{"role": "user", "content": user_content}],
         output_format=TailoringPlan,
