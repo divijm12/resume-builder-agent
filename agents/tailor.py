@@ -11,7 +11,8 @@ that already exist in master_resume.yaml -- never invent a bullet, metric, or
 skill. This is enforced here, not just prompted: every selected id is checked
 against the master resume, unknown skills are dropped, and reworded bullet
 text is rejected (reverted to the original) if it introduces a number that
-wasn't in the source bullet.
+wasn't in the source bullet, or drops a named technology/vendor term (from
+that project's `tech` list) that was present in the original bullet.
 """
 
 import argparse
@@ -41,15 +42,29 @@ SYSTEM_PROMPT = (
     "rewording 'a turfgrass disease outbreak research project' down to just 'a "
     "research project' is NOT a light reword -- it deletes the exact detail "
     "that makes the work distinctive and credible, even though no number "
-    "changed. If a domain-specific detail doesn't obviously match the JD, keep "
-    "it in anyway rather than cutting it; you can still add JD-matching "
-    "language elsewhere in the same bullet without removing what was already "
-    "there. When rewording, prefer the formula 'Accomplished [X], as measured "
+    "changed. The same applies to named technologies, tools, vendors, and "
+    "products: 'Sarvam AI for STT/TTS' must not become generic 'speech-to-text/"
+    "text-to-speech', and 'a Supabase backend' must not become just 'a "
+    "backend' -- keep the actual name. If a domain-specific detail or named "
+    "technology doesn't obviously match the JD, keep it in anyway rather than "
+    "cutting it; you can still add JD-matching language elsewhere in the same "
+    "bullet without removing what was already there. When rewording, prefer "
+    "the formula 'Accomplished [X], as measured "
     "by [Y], by doing [Z]' -- built only from the X, Y, and Z already present "
     "in that original bullet, never inventing a metric just to complete the "
-    "formula, and never dropping domain-specific words to make it fit. If a "
-    "bullet can't honestly fit that formula or be reworded to fit the JD "
-    "without changing or deleting its facts, use the original text "
+    "formula, and never dropping domain-specific words to make it fit. This "
+    "cuts both ways -- do not ADD a claim either. Never append a rhetorical "
+    "qualifier that asserts a competency the bullet doesn't already describe: "
+    "phrases like 'demonstrating X', 'showcasing Y', or 'highlighting Z' "
+    "tacked onto the end of a bullet are exactly this mistake. Never name a "
+    "technology, tool, or skill in the reworded text unless it was already "
+    "part of what that specific bullet described -- e.g. don't add 'using "
+    "Python' to a bullet that never mentioned Python, even if Python is "
+    "elsewhere on the resume. Expanding something already named to its fuller "
+    "form (e.g. 'Claude API' to 'Anthropic Claude API') is fine; naming a "
+    "different technology that bullet never mentioned is not. If a bullet "
+    "can't honestly fit that formula or be reworded to fit the JD without "
+    "changing, deleting, or adding to its facts, use the original text "
     "unchanged.\n\n"
     "Select and order skills and bullets to foreground what matches this JD. "
     "Prioritize bullets/skills the score input flagged as matched or as a "
@@ -132,23 +147,35 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
     warnings = []
     actually_reworded_ids = []
 
-    def resolve_bullets(selected_bullets, valid_ids_for_parent):
+    def resolve_bullets(selected_bullets, valid_ids_for_parent, protected_terms=frozenset()):
         resolved = []
         for sb in selected_bullets:
             if sb["id"] not in bullet_text or sb["id"] not in valid_ids_for_parent:
                 warnings.append(f"Dropped unknown bullet id '{sb['id']}' -- not in master resume.")
                 continue
             original = bullet_text[sb["id"]]
-            if _numeric_tokens(sb["text"]) - _numeric_tokens(original):
+            new_text = sb["text"]
+            dropped_terms = [
+                t for t in protected_terms
+                if t.lower() in original.lower() and t.lower() not in new_text.lower()
+            ]
+            if _numeric_tokens(new_text) - _numeric_tokens(original):
                 warnings.append(
                     f"Reworded text for bullet '{sb['id']}' introduced a number not in "
                     f"the original -- reverted to original text."
                 )
                 resolved.append({"id": sb["id"], "text": original})
+            elif dropped_terms:
+                warnings.append(
+                    f"Reworded text for bullet '{sb['id']}' dropped named "
+                    f"technology/vendor term(s) {dropped_terms} present in the original -- "
+                    f"reverted to original text."
+                )
+                resolved.append({"id": sb["id"], "text": original})
             else:
-                if sb["text"] != original:
+                if new_text != original:
                     actually_reworded_ids.append(sb["id"])
-                resolved.append({"id": sb["id"], "text": sb["text"]})
+                resolved.append({"id": sb["id"], "text": new_text})
         return resolved
 
     tailored_experience_by_id = {}
@@ -172,9 +199,10 @@ def validate_and_build(plan: dict, master_resume: dict) -> dict:
             warnings.append(f"Dropped unknown project id '{sp['id']}'.")
             continue
         valid_ids = {b["id"] for b in proj["bullets"]}
+        protected_terms = set(proj.get("tech", []))
         tailored_projects.append({
             **{k: v for k, v in proj.items() if k != "bullets"},
-            "bullets": resolve_bullets(sp["bullets"], valid_ids),
+            "bullets": resolve_bullets(sp["bullets"], valid_ids, protected_terms=protected_terms),
         })
     # Projects keep the model's relevance-ranked order (unlike experience, not chronological).
 
