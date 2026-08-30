@@ -85,7 +85,7 @@ def run_pipeline(
     *,
     company_override: str = None,
     role_override: str = None,
-    model: str = DEFAULT_MODEL,
+    tailor_model: str = DEFAULT_MODEL,
     mode: str = "aggressive",
     outputs_dir: Path = Path("outputs"),
     db_path: Path = Path("data/applications.db"),
@@ -96,7 +96,16 @@ def run_pipeline(
     ("ingesting"/"scoring"/"tailoring"/"rendering"/"logging") right before
     each stage starts -- CLI usage passes none, so behavior there is
     unchanged. This is how a caller (e.g. a web backend) can report live
-    progress on a run that takes several sequential API calls."""
+    progress on a run that takes several sequential API calls.
+
+    tailor_model: only affects the tailoring stage. Ingest and scoring
+    (both the before- and after-tailoring score) always use their own
+    module defaults (Haiku) regardless of this -- those stages are cheap,
+    largely mechanical, and have shown no benefit from a bigger model in
+    this project, while tailoring is the one genuine judgment call a
+    stronger model can plausibly improve. This also keeps score_before and
+    score_after on the same model, which the score-drop guardrail depends
+    on for a fair comparison -- see tailor.py's tailor_resume docstring."""
 
     def report(stage: str):
         if progress_callback:
@@ -105,11 +114,11 @@ def run_pipeline(
     master_resume = yaml.safe_load(resume_path.read_text())
 
     report("ingesting")
-    jd_parsed = ingest_jd(jd_text, model=model)
+    jd_parsed = ingest_jd(jd_text)
     report("scoring")
-    score = score_jd(jd_parsed, master_resume, model=model)
+    score = score_jd(jd_parsed, master_resume)
     report("tailoring")
-    tailored = tailor_resume(jd_parsed, score, master_resume, model=model, mode=mode)
+    tailored = tailor_resume(jd_parsed, score, master_resume, model=tailor_model, mode=mode)
 
     company = company_override or jd_parsed.get("company") or "UnknownCompany"
     role = role_override or jd_parsed.get("role") or "UnknownRole"
@@ -165,7 +174,10 @@ def main():
     source.add_argument("--jd-text", type=str, help="Raw JD text")
     parser.add_argument("--company", help="Override the company name (else auto-extracted from the JD)")
     parser.add_argument("--role", help="Override the role title (else auto-extracted from the JD)")
-    parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model to use (default: {DEFAULT_MODEL})")
+    parser.add_argument(
+        "--tailor-model", default=DEFAULT_MODEL,
+        help=f"Claude model for the tailoring stage only -- ingest/scoring always use their own default (default: {DEFAULT_MODEL})",
+    )
     parser.add_argument(
         "--mode", choices=MODES, default="aggressive",
         help="'aggressive' (default) rewords bullets; 'honest' only selects/reorders/relabels",
@@ -181,7 +193,7 @@ def main():
         jd_text,
         company_override=args.company,
         role_override=args.role,
-        model=args.model,
+        tailor_model=args.tailor_model,
         mode=args.mode,
         outputs_dir=args.outputs_dir,
         db_path=args.db,

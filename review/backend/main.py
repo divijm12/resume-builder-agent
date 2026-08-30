@@ -66,11 +66,11 @@ class CreateJobRequest(BaseModel):
     jd_text: str
     company: Optional[str] = None
     role: Optional[str] = None
-    model: Optional[str] = None
+    tailor_model: Optional[str] = None
     mode: Optional[str] = None
 
 
-def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[str], model: str, mode: str):
+def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[str], tailor_model: str, mode: str):
     def report(stage: str):
         with JOBS_LOCK:
             JOBS[job_id]["stage"] = stage
@@ -80,7 +80,7 @@ def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[s
             jd_text,
             company_override=company,
             role_override=role,
-            model=model,
+            tailor_model=tailor_model,
             mode=mode,
             outputs_dir=OUTPUTS_DIR,
             db_path=DB_PATH,
@@ -103,7 +103,7 @@ def create_job(body: CreateJobRequest, background_tasks: BackgroundTasks):
         JOBS[job_id] = {"status": "running", "stage": "starting", "application_id": None, "error": None}
     background_tasks.add_task(
         _run_job, job_id, body.jd_text, body.company, body.role,
-        body.model or apply.DEFAULT_MODEL, body.mode or "aggressive",
+        body.tailor_model or apply.DEFAULT_MODEL, body.mode or "aggressive",
     )
     return {"job_id": job_id}
 

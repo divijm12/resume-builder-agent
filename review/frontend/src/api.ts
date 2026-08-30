@@ -106,7 +106,9 @@ export function createJob(params: {
   jd_text: string;
   company?: string;
   role?: string;
-  model?: string;
+  /** Only used for the tailoring stage -- ingest/scoring always run on a
+   * fixed fast model server-side. See apply.py's run_pipeline docstring. */
+  tailor_model?: string;
   mode?: string;
 }): Promise<{ job_id: string }> {
   return request("/api/jobs", { method: "POST", body: JSON.stringify(params) });

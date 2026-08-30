@@ -673,6 +673,16 @@ def tailor_resume(
     reordering, and relabeling skills -- this is the original, heavily
     tested behavior. "honest" only selects/reorders/relabels; bullet text is
     never touched (enforced in validate_and_build, not just prompted).
+
+    model: only used for the tailoring call itself -- the internal rescore
+    (score_after) always uses score.py's own default model regardless of
+    what's passed here, since it must match whatever model produced
+    score_before for the comparison between them to be meaningful. Ingest and
+    scoring are cheap, largely mechanical stages where a bigger model hasn't
+    shown any benefit in this project; tailoring -- the actual judgment call
+    of what to select and how to word it -- is where a stronger model
+    plausibly earns its slowness, so it's the only stage callers (apply.py,
+    the review API) let a user choose a model for.
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
@@ -702,8 +712,14 @@ def tailor_resume(
     result = validate_and_build(plan, master_resume, mode=mode)
 
     # Rescore the tailored resume with score.py's own scoring logic so the impact
-    # of tailoring (or lack of it) is measured, not assumed.
-    score_after = score_jd(jd_parsed, result["tailored_resume"], model=model)
+    # of tailoring (or lack of it) is measured, not assumed. Deliberately NOT
+    # passed `model` here (the tailoring model, which may be Sonnet or
+    # whatever the caller chose) -- score_before and score_after must be
+    # judged by the same model or the delta (and the score-drop guardrail
+    # below, which compares them directly) becomes meaningless. score_jd's
+    # own default is always used for both, regardless of what model tailored
+    # the resume; only the tailoring call itself is user-selectable.
+    score_after = score_jd(jd_parsed, result["tailored_resume"])
 
     # Hard guardrail (user-specified, non-negotiable): tailoring must never
     # leave the candidate worse off than doing nothing. If the rescored match

@@ -86,7 +86,7 @@ export default function NewApplication() {
   const [jdText, setJdText] = useState("");
   const [company, setCompany] = useState("");
   const [role, setRole] = useState("");
-  const [model, setModel] = useState(MODELS[0].value);
+  const [tailorModel, setTailorModel] = useState(MODELS[0].value);
   const [mode, setMode] = useState<"honest" | "aggressive">("aggressive");
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -134,7 +134,7 @@ export default function NewApplication() {
         jd_text: jdText,
         company: company || undefined,
         role: role || undefined,
-        model,
+        tailor_model: tailorModel,
         mode,
       });
       setJobId(job_id);
@@ -243,11 +243,11 @@ export default function NewApplication() {
             })}
 
             <div className="rounded-lg border border-[#232b3a] bg-[#0c0f16] p-4">
-              <div className="mb-2 text-[10px] uppercase tracking-wide text-[#4a5468]">Model</div>
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-[#4a5468]">Tailoring model</div>
               <div className="relative">
                 <select
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
+                  value={tailorModel}
+                  onChange={(e) => setTailorModel(e.target.value)}
                   disabled={submitting}
                   className="w-full appearance-none bg-transparent font-mono text-sm text-[#e4e8f0] focus:outline-none disabled:opacity-60"
                 >
@@ -260,6 +260,9 @@ export default function NewApplication() {
                 <div className="pointer-events-none absolute right-0 top-1">
                   <ChevronDown />
                 </div>
+              </div>
+              <div className="mt-2 text-[10px] leading-relaxed text-[#4a5468]">
+                Only affects tailoring -- parsing and scoring always run on a fast, fixed model.
               </div>
             </div>
           </div>
