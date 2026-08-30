@@ -19,43 +19,63 @@ basics:
   location: ""
   links: {linkedin: "", github: "", portfolio: ""}
 
-summary_variants:
+summary_variants:            # present in the file, NOT consumed by any stage yet -- known unused field
   - id: "general"
     text: ""
 
 skills:
   - name: "Python"
-    tags: ["backend", "data"]
-    years: 5
+    tags: ["backend", "data"]  # no `years` field in practice
 
 experience:
   - id: "exp_001"
     company: ""
     title: ""
-    start: "2022-01"
-    end: "present"
+    start: "2024-05"
+    end: "present"            # or a real "YYYY-MM" date; "present" ranks highest in _date_rank
     bullets:
       - id: "b_001"
         text: ""
-        tags: ["leadership", "python", "scale"]
-        metrics: true   # has quantified impact
-      - id: "b_002"
-        text: ""
-        tags: ["data-pipeline"]
+        tags: ["data-pipeline", "etl", "python"]
+        metrics: true          # has quantified impact -- present in the data, not read by tailor.py's
+                                # guardrails (those key off exact-text matching against skill names/tech
+                                # lists, not tags); still useful as a human-readable hint in the file
 
-education: [...]
-projects: [...]
-certifications: [...]
+projects:
+  - id: "proj_001"
+    name: ""
+    status: "in-progress"
+    date: "present"
+    tech: ["Python", "PostgreSQL"]   # protects these terms from being dropped in a reworded bullet
+    bullets: [...]                    # same {id, text, tags, metrics} shape as experience bullets
+
+education:
+  - degree: ""
+    institution: ""
+    honors: ""
+    start: ""
+    end: "2025-05"    # real graduation date -- score.py computes time-since-graduation from this
+                       # (added 2026-08-30); leave blank only if genuinely not yet graduated
+
+certifications:
+  - name: ""
+    year: 2025
 ```
 
-Every bullet gets an `id` and `tags`. Tailoring = **selecting, reordering, and lightly rewording** tagged bullets to match a JD's tags — never inventing new ones. This keeps hallucination risk near zero and makes tailoring fast/cheap (small diffs, not full regeneration).
+Every bullet gets an `id` and `tags`. Tailoring = **selecting, reordering, and lightly rewording** bullets to match a JD's requirements — never inventing new ones. This keeps hallucination risk near zero and makes tailoring fast/cheap (small diffs, not full regeneration). In practice, the guardrails that actually gate a reword (see Stage 2) key off exact-text matching against `skills[].name` and `projects[].tech[]`, not the per-bullet `tags` — tags are there for human scanning, not enforcement.
 
 ### `data/applications.db` (SQLite)
+Versioned in `data/schema.sql` (tracked in git — the live `.db` itself is gitignored, contains personal data). Current shape:
 ```sql
 applications(
   id, created_at, company, role_title, jd_raw, jd_parsed_json,
   match_score, resume_variant_path, cover_letter_path,
-  status,          -- drafted | applied | outreach_sent | interview | rejected | ghosted | offer
+  tailor_result_json,  -- full tailor.py output as one JSON blob (tailored_resume, diff_summary,
+                        -- validation_log, unaddressed_*, ats_scan_notes, score_before/after,
+                        -- overall_score_delta) -- everything the review UI needs without re-deriving
+  mode,                -- 'honest' | 'aggressive' (default), see Stage 2 -- reword intensity only,
+                        -- neither mode fabricates
+  status,               -- drafted | applied | outreach_sent | interview | rejected | ghosted | offer
   contact_name, contact_email, contact_source, contact_verified,
   outreach_sent_at, response_received, notes
 )
@@ -74,9 +94,9 @@ This DB is the actual product. After ~30 applications, you can query which bulle
 Each stage = one Claude Code subagent / skill with a narrow job.
 
 ### Stage 0 — JD Ingest
-**In:** raw JD text or URL
+**In:** raw JD text (pasted) -- URL fetching and per-hash caching were part of the original plan below but never built; only raw pasted text is supported today
 **Out:** `jd_parsed.json` — `{role, company, seniority, must_have_skills[], nice_to_have[], responsibilities[], keywords[]}`
-**Notes:** if URL, fetch and strip boilerplate before parsing. Cache parsed JDs by hash to avoid re-parsing.
+**Notes (original plan, not implemented):** if given a URL, fetch and strip boilerplate before parsing; cache parsed JDs by hash to avoid re-parsing.
 
 ### Stage 1 — Scoring
 **In:** `jd_parsed.json` + `master_resume.yaml`
@@ -129,7 +149,7 @@ Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refer
 - **Email verification/finding:** Hunter.io or Apollo.io API (free tier is enough at your volume)
 - **Sending:** Gmail API, OAuth, draft-then-confirm — never blind SMTP send
 - **Rendering:** `python-docx` for `.docx`, `reportlab` for `.pdf` (independent renders, not a docx→pdf conversion — see Stage 3 notes)
-- **Review UI:** start with a CLI (`rich`/`textual` table) — upgrade to a small Streamlit app only if the CLI starts feeling limiting
+- **Review UI:** originally planned as a CLI, built instead as a full web app (2026-08-28) — FastAPI backend (`review/backend/`) + React/Vite/TypeScript/Tailwind frontend (`review/frontend/`), since the user wanted a real trigger-and-review interface, not a read-only list. See Stage 7.
 
 ---
 

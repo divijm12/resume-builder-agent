@@ -15,8 +15,12 @@ Build in phases that are each independently useful — don't wait for the full p
 - [x] Tailoring agent (score + master resume → tailored resume, reorder/reword only)
 - [x] Render to docx (+ pdf)
 - [x] Manually test closely for hallucinated content — done far more heavily than "5 JDs": iterated repeatedly against the same real JD (Micron) specifically because it kept surfacing new fabrication classes each round (dropped domain detail, dropped named tech, added unsupported claims, appended "demonstrating X" clauses) — each one fixed and re-verified. Known remaining gap: the appended-clause guardrail only catches em-dash-style separators, not comma-led ones — see ARCHITECTURE.md Stage 2 notes.
+- [x] Honest/Aggressive tailoring modes (both non-fabricating; added 2026-08-28)
+- [x] Hard guardrail: tailoring can never score lower than doing nothing (added 2026-08-30, falls back to the untouched master resume rather than ship a worse result)
+- [x] Tenure/graduation-date facts computed in code instead of left for the model to guess (added 2026-08-30)
+- [x] Per-stage model split: only the tailoring call is user-selectable (Haiku/Sonnet); ingest and scoring are hard-locked to a fast model (added 2026-08-30)
 
-**Done when:** you paste a JD and get a tailored, honest resume + score in under a minute. ✅ Done 2026-08-28 — `apply.py` does this in one command.
+**Done when:** you paste a JD and get a tailored, honest resume + score in under a minute. ✅ Done 2026-08-28 — `apply.py` does this in one command. Hardened well past that bar since — see LEARNING_LOG.md sections 8–11 for the fabrication/scoring bugs found and fixed along the way.
 
 ## Phase 2 — Cover letters
 - [ ] Cover letter agent, same JD input
@@ -27,8 +31,8 @@ Build in phases that are each independently useful — don't wait for the full p
 
 ## Phase 3 — Tracking loop
 - [x] Every generated application writes a row to `applications.db` — `apply.py` logs an `applications` row + `resume_versions` row immediately after rendering, per CLAUDE.md hard rule 4
-- [ ] Simple CLI to list applications and update status (applied/interview/rejected/etc.)
-- [ ] A few canned queries: response rate by resume variant, by tag emphasis, by company size
+- [x] List applications and update status (applied/interview/rejected/etc.) — originally scoped as a CLI, built instead as the full `review/` web dashboard (2026-08-28), which does this and more (trigger runs, view diffs/gaps, download files)
+- [ ] A few canned queries: response rate by resume variant, by tag emphasis, by company size — deliberately not started yet; only a handful of real applications are logged so far, not enough volume for correlation queries to say anything meaningful
 
 **Done when:** you're logging every real application you send, even ones you tailor by hand.
 This phase matters more than it sounds — it's your actual edge over commercial tools.
@@ -50,7 +54,7 @@ This phase matters more than it sounds — it's your actual edge over commercial
 **Done when:** you can review and approve a full application + outreach package in under 3 minutes per company.
 
 ## Phase 6 — Polish / stretch (only if you're enjoying it)
-- [ ] Small web UI instead of CLI for the review queue
+- [x] Small web UI instead of CLI for the review queue — done as part of Phase 3, went straight to a full React dashboard (`review/frontend/`) rather than a CLI; redesigned with a real visual identity 2026-08-28
 - [ ] Auto-suggest which of your resume "variants" to A/B test next based on response data
 - [ ] Weekly summary report (applications sent, response rate, interview rate)
 
@@ -58,3 +62,5 @@ This phase matters more than it sounds — it's your actual edge over commercial
 
 ## Suggested order of effort
 Phases 1–3 alone will already save you the most time and give you the data-driven edge. Phases 4–5 are valuable but carry real risk (email deliverability, verification quality) — build them once 1–3 are solid and you trust the tailoring output completely.
+
+**Current position (2026-08-30):** Phase 1 is solid and well past its original bar; Phase 3 is logging/tracking-complete, its analytics item deliberately waiting on more real usage. Phase 2 (cover letters) is the natural next build — same proven pipeline shape, immediately useful, no dependency on accumulated data the way Phase 3's queries or Phase 6's A/B suggestions are.
