@@ -166,20 +166,28 @@ def find_application_contact(app_id: int):
     the chosen fields), same "human decides" pattern as the status dropdown.
 
     Passes this application's role_title through so find_contacts() can
-    boost recruiters/team-relevant contacts to the top -- see
-    agents/find_contact.py's module docstring. This is ranking/labeling
-    only: it is never sent to Hunter as a filter, so the full candidate
-    list is always what's returned."""
+    boost recruiters/team-relevant contacts to the top, and, when the JD
+    itself named a real hiring manager (agents/ingest_jd.py's
+    hiring_manager_name), passes that through too so find_contacts() can
+    run one additional targeted Hunter lookup for that specific person --
+    see agents/find_contact.py's module docstring. All of this is
+    ranking/labeling/merging only: it is never sent to Hunter as a filter,
+    so the full candidate list Domain Search would return on its own is
+    always still present."""
     conn = _get_db()
     try:
         row = conn.execute(
-            "SELECT company, role_title FROM applications WHERE id = ?", (app_id,)
+            "SELECT company, role_title, jd_parsed_json FROM applications WHERE id = ?", (app_id,)
         ).fetchone()
     finally:
         conn.close()
     if row is None:
         raise HTTPException(404, "application not found")
-    return find_contact.find_contacts(row["company"], role_title=row["role_title"])
+    jd_parsed = json.loads(row["jd_parsed_json"]) if row["jd_parsed_json"] else {}
+    hiring_manager_name = jd_parsed.get("hiring_manager_name")
+    return find_contact.find_contacts(
+        row["company"], role_title=row["role_title"], hiring_manager_name=hiring_manager_name
+    )
 
 
 class UpdateApplicationRequest(BaseModel):

@@ -686,6 +686,33 @@ too. That's a stronger check than a clean null would have been: it shows
 the model is actually reading for a real, specific mention, not just
 defaulting to empty.
 
+**Immediate follow-up, same day:** extracting the name is only half the
+job — it should actually be used. The requirement, stated plainly: if the
+JD names someone, go find that specific person *in addition to* the
+regular candidate list, never *instead of* it. Hunter has a second
+endpoint for exactly this, Email Finder (`name` + `company` in, one
+person's likely email out), and its own docs state a miss costs no
+credit — worth checking directly rather than assuming, same discipline as
+every other provider-behavior claim in this project. That guarantee is
+what makes it safe to *always* attempt this lookup whenever a name is
+available, with no cost risk on a miss.
+
+The merge logic is the actual design point, not the extra API call: a hit
+gets deduped against the existing list by email (so a person Domain
+Search already found doesn't show up twice) and re-labeled "Named in JD"
+with the highest boost of any signal so far; a miss changes nothing.
+Tested four cases with mocked data before spending anything real — found
++ already-present (dedup), found + new person (added, list still has
+everyone else), not found (list unaffected), and no name given at all
+(identical to before this feature existed) — then verified live against
+Anduril Industries with a real name from an earlier test ("Camrin Opp"):
+came back deduped, relabeled, and sorted first, with the other 9 real
+contacts, including the previous top department match, still fully
+present underneath. The rule "boost, never filter or replace" from the
+department-boost feature carried over unchanged to a stronger signal —
+consistent design across two feature passes, not something reinvented
+each time.
+
 ---
 
 *(more entries added as this project continues)*

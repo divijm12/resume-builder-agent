@@ -330,8 +330,9 @@ export default function ApplicationDetail() {
         {showCandidates ? (
           <div className="space-y-3">
             <p className="text-[11px] text-[#4a5468]">
-              Contacts from Hunter.io for this company. Recruiters and people in a department close to this role are
-              boosted to the top and labeled below — everyone else is still shown, just unlabeled.
+              Contacts from Hunter.io for this company. Recruiters, people in a department close to this role, and
+              anyone the JD named directly are boosted to the top and labeled below — everyone else is still shown,
+              just unlabeled.
             </p>
             {contactMessage && <p className="text-sm text-[#6b7690]">{contactMessage}</p>}
             {(contactCandidates ?? []).map((c, i) => (

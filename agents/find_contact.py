@@ -46,6 +46,19 @@ or hidden, every candidate Hunter returned is still present; this only
 changes ranking and adds a label, per explicit user preference over a
 hard filter that could make the list look emptier than it really is when
 a company's Hunter data doesn't happen to cover a matching department.
+
+Named-in-JD targeted lookup (added 2026-08-31): when the JD text itself
+names a real hiring manager (see agents/ingest_jd.py's `hiring_manager_name`),
+that name is looked up specifically via Hunter's Email Finder endpoint
+(`https://api.hunter.io/v2/email-finder`, `company` + `full_name`) --
+Hunter's own docs confirm no credit is charged when it finds nothing, so
+this is safe to always attempt when a name is available. If found, it's
+merged into the SAME list the Domain Search already returns (deduped by
+email if that person also showed up there) and boosted above every other
+signal, labeled "Named in JD". This never replaces or shrinks the regular
+list -- every candidate Domain Search would have returned on its own is
+still present either way; the targeted lookup can only add or re-label,
+never remove.
 """
 
 import argparse
@@ -59,6 +72,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 HUNTER_DOMAIN_SEARCH_URL = "https://api.hunter.io/v2/domain-search"
+HUNTER_EMAIL_FINDER_URL = "https://api.hunter.io/v2/email-finder"
+
+# Higher than any combination of the department/HR boosts below (max 3) --
+# a name stated directly in the JD is a stronger signal than an inferred
+# department match, so it always sorts to the very top when both apply.
+NAMED_IN_JD_BOOST = 10
 
 # Hunter's own fixed department vocabulary (documented in their API reference),
 # with a display label for each -- used only for the two departments that
@@ -129,12 +148,67 @@ def _infer_target_department(role_title: Optional[str]) -> Optional[str]:
     return None
 
 
-def find_contacts(company: str, role_title: Optional[str] = None, api_key: Optional[str] = None) -> dict:
+def _find_named_contact(company: str, full_name: str, key: str) -> Optional[dict]:
+    """Targeted lookup for one specific named person via Hunter's Email
+    Finder. Returns a contact dict shaped like find_contacts()'s regular
+    entries (minus _relevance_boost, set by the caller), or None if Hunter
+    found nothing or the request failed -- both are silent, expected
+    outcomes here, never raised, since a miss on this targeted lookup
+    should never break the regular candidate list."""
+    try:
+        response = requests.get(
+            HUNTER_EMAIL_FINDER_URL,
+            params={"company": company, "full_name": full_name, "api_key": key},
+            timeout=15,
+        )
+    except requests.RequestException:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    data = response.json().get("data") or {}
+    email = data.get("email")
+    if not email:
+        return None
+
+    verification = data.get("verification") or {}
+    status = verification.get("status")
+    name = " ".join(filter(None, [data.get("first_name"), data.get("last_name")])).strip()
+
+    return {
+        "name": name or full_name,
+        "title": data.get("position"),
+        "email": email,
+        "confidence": data.get("score"),
+        "department": data.get("department"),
+        "relevance_label": "Named in JD",
+        "verified": status == "valid",
+        "verification_status": status,
+        "decision_maker": data.get("seniority") in ("senior", "executive"),
+        "sources_count": len(data.get("sources") or []),
+        "source": "hunter.io",
+    }
+
+
+def find_contacts(
+    company: str,
+    role_title: Optional[str] = None,
+    hiring_manager_name: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> dict:
     """Look up candidate hiring contacts at `company` via Hunter.io.
 
     `role_title`, if given, only affects ranking/labeling (see module
     docstring) -- it is never sent to Hunter as a filter, so the full,
     unfiltered candidate list Hunter returns is always what's available.
+
+    `hiring_manager_name`, if given (from a JD that named one explicitly --
+    see agents/ingest_jd.py), triggers one additional targeted lookup via
+    Hunter's Email Finder for that specific person. A hit is merged into
+    the same list and boosted to the top labeled "Named in JD"; a miss
+    costs nothing (Hunter doesn't charge a credit for an unfound Email
+    Finder lookup) and changes nothing about the regular list.
 
     Returns {"contacts": [...], "message": str | None, "error": str | None}.
     Never raises for an expected failure mode (no results, bad key, rate
@@ -215,9 +289,24 @@ def find_contacts(company: str, role_title: Optional[str] = None, api_key: Optio
             }
         )
 
-    # Relevant contacts (HR/recruiting, or the inferred team department) sort
-    # to the top; confidence breaks ties within each group. Nothing is
-    # dropped -- every contact Hunter returned is still in this list.
+    if hiring_manager_name:
+        named = _find_named_contact(company, hiring_manager_name, key)
+        if named:
+            existing = next(
+                (c for c in contacts if c.get("email") and c["email"].lower() == named["email"].lower()),
+                None,
+            )
+            if existing:
+                existing["relevance_label"] = "Named in JD"
+                existing["_relevance_boost"] = NAMED_IN_JD_BOOST
+            else:
+                named["_relevance_boost"] = NAMED_IN_JD_BOOST
+                contacts.append(named)
+
+    # Relevant contacts (named in the JD, HR/recruiting, or the inferred team
+    # department) sort to the top; confidence breaks ties within each group.
+    # Nothing is dropped -- every contact Hunter's Domain Search returned is
+    # still in this list either way.
     contacts.sort(key=lambda c: (c["_relevance_boost"], c["confidence"] or 0), reverse=True)
     for c in contacts:
         del c["_relevance_boost"]
@@ -230,9 +319,14 @@ def main():
     parser = argparse.ArgumentParser(description="Find candidate hiring contacts for a company via Hunter.io.")
     parser.add_argument("--company", required=True, help="Company name to search")
     parser.add_argument("--role-title", default=None, help="Optional job title, used only to rank/label results")
+    parser.add_argument(
+        "--hiring-manager-name",
+        default=None,
+        help="Optional name (from a JD that stated one) to look up specifically via Email Finder",
+    )
     args = parser.parse_args()
 
-    result = find_contacts(args.company, role_title=args.role_title)
+    result = find_contacts(args.company, role_title=args.role_title, hiring_manager_name=args.hiring_manager_name)
     print(json.dumps(result, indent=2))
 
 
