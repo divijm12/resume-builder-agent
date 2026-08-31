@@ -26,10 +26,25 @@ Same anti-AI-tell writing-style guardrail as cover_letter.py: no em
 dashes, avoid stock phrases/tricolon overuse/uniform sentence rhythm --
 arguably even more important here since this is addressed to one real
 named person, not a generic reader.
+
+JD-relevance check (added 2026-08-31): the model picks exactly ONE
+accomplishment to highlight (see the prompt), but nothing previously
+verified that accomplishment was actually relevant to THIS job posting --
+only that it was true (grounded in a real bullet). `_jd_keyword_set()`
+pulls tokens from the JD's own must_have_skills/nice_to_have/keywords/
+responsibilities; if none of the model's citation-bearing ("hook") claims
+share a token with that set (checking both the claim's own wording and
+its cited bullet's text, since the model may paraphrase away the literal
+term), a validation_log warning fires. This is a soft, logged flag, not a
+hard drop -- a real accomplishment can be relevant through a genuine
+synonym a keyword check can't catch (e.g. resume says "Kafka", JD says
+"streaming systems"), so a false positive here should read as "worth a
+second look," never "this is wrong."
 """
 
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import List, Optional
 
@@ -38,7 +53,7 @@ import yaml
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from cover_letter import CoverLetterClaim, _strip_em_dashes, validate_and_build
+from cover_letter import CoverLetterClaim, _bullet_lookup, _strip_em_dashes, validate_and_build
 
 load_dotenv()
 
@@ -50,6 +65,35 @@ DEFAULT_MODEL = "claude-haiku-4-5"
 # claim or drop the sign-off -- worse than a slightly-long draft a human
 # will read and hand-edit anyway.
 BODY_LENGTH_BUDGET = 500
+
+# A trailing '.'/'-'/'#' must be followed by more alnum chars to count as
+# part of the token -- otherwise ordinary sentence punctuation ("Kafka.")
+# gets absorbed into the word and silently never matches anything ("kafka."
+# != "kafka"). Internal punctuation still survives ("node.js", "front-end").
+_TOKEN_RE = re.compile(r"[a-z0-9]+(?:[+#.-][a-z0-9]+)*")
+
+
+def _tokenize(text: str) -> set:
+    """Lowercase word/tech-term tokens (keeps internal '+', '.', '#', '-' so
+    terms like 'node.js', 'front-end' survive as one token, without
+    absorbing trailing sentence punctuation). Tokens of length <= 2 are
+    dropped -- too common to mean anything for a relevance check."""
+    return {t for t in _TOKEN_RE.findall(text.lower()) if len(t) > 2}
+
+
+def _jd_keyword_set(jd_parsed: dict) -> set:
+    """Tokens drawn from the JD's own stated skills/keywords/responsibilities
+    -- used only for the soft relevance check in generate_outreach_draft,
+    never to filter or invent content. Deliberately broad (all four fields,
+    not just must_have_skills) since a real accomplishment can be relevant
+    through a responsibility or a nice-to-have even when it's not a literal
+    must-have."""
+    tokens = set()
+    for field in ("must_have_skills", "nice_to_have", "keywords", "responsibilities"):
+        for item in jd_parsed.get(field) or []:
+            tokens |= _tokenize(item)
+    return tokens
+
 
 SYSTEM_PROMPT = (
     "You write a short outreach email a candidate will send to a real person at a "
@@ -141,10 +185,30 @@ def generate_outreach_draft(
     )
     draft = response.parsed_output.model_dump()
 
+    # JD-relevance check -- runs on the raw, pre-validation claims (relevance
+    # is a property of which bullet got cited, independent of whether that
+    # claim's numbers later survive validate_and_build's fabrication check).
+    jd_tokens = _jd_keyword_set(jd_parsed)
+    bullet_text = _bullet_lookup(tailored_resume)
+    hook_claims = [c for para in draft["paragraphs"] for c in para if c.get("source_bullet_ids")]
+    hook_is_relevant = any(
+        (_tokenize(c["text"]) | _tokenize(" ".join(bullet_text.get(bid, "") for bid in c["source_bullet_ids"])))
+        & jd_tokens
+        for c in hook_claims
+    )
+
     validated = validate_and_build({"paragraphs": draft["paragraphs"]}, tailored_resume)
     subject = _strip_em_dashes(draft["subject"])
     body_text = validated["cover_letter_text"]
     validation_log = validated["validation_log"]
+
+    if hook_claims and not hook_is_relevant:
+        validation_log.append(
+            "This draft's specific claim(s) don't share a recognizable skill/keyword with "
+            "the JD's stated requirements -- the chosen accomplishment may not be the most "
+            "relevant one for this posting. Worth a second look (a real match can still miss "
+            "this check via a synonym, e.g. 'Kafka' vs 'streaming systems')."
+        )
 
     if len(body_text) > BODY_LENGTH_BUDGET:
         validation_log.append(

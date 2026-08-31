@@ -796,6 +796,39 @@ to look for it specifically -- a reminder that rerunning old tests after
 a change earns its keep even when the change looks unrelated to what
 they cover.
 
+**Same-day follow-up, a different axis entirely:** the user asked a
+sharp question after the formatting fix -- is the outreach draft always
+grounded in the JD and the resume? The honest answer split the guardrail
+into two things that sound similar but aren't. "Grounded in the resume"
+was already solved: every number cites a real bullet, checked in code.
+But "relevant to the JD" was never checked at all -- the model picks one
+accomplishment to highlight, and nothing verified that accomplishment
+actually matched what this specific posting asked for. A true, real,
+resume-grounded claim can still be the wrong thing to lead with for this
+job.
+
+The fix is a second, independent, code-computed check: tokenize the JD's
+own stated skills/keywords/responsibilities, tokenize the model's chosen
+claim (and its cited bullet's text, in case the model paraphrased away
+the literal term), and flag it if there's zero overlap. Same "soft flag,
+not a hard drop" choice as the length check, for the same reason: a
+keyword check can't see a real synonym ("Kafka" vs "streaming systems"),
+so treating a miss as *proof* of irrelevance would be its own kind of
+false claim.
+
+Writing the mocked tests for this caught a real bug before it ever ran
+against paid API calls: the tokenizer's regex was written to preserve
+punctuation inside compound tech terms ("node.js", "c++"), but it also
+silently absorbed a sentence's trailing period into the last word --
+"Kafka." tokenized as one unit, which never equals "Kafka" from the JD
+side. That would have made the relevance check fire a false "not
+relevant" warning on nearly every real sentence, since almost every
+sentence ends in a period. It only surfaced because the test asserted
+the *positive* case too (a genuinely relevant claim should NOT be
+flagged), not just the negative case (an irrelevant one should be) --
+a reminder that a guardrail test suite needs to prove the check stays
+quiet when it should, not only that it fires when it should.
+
 ---
 
 *(more entries added as this project continues)*

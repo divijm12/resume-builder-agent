@@ -272,6 +272,30 @@ where the greeting still ends up merged with the body (no paragraph
 break found) -- same "soft flag, don't guess a fix" philosophy as the
 length check, since forcing a line break at the wrong spot could look
 worse than leaving it for a human's quick pass.
+**JD-relevance check (added 2026-08-31):** the fabrication guardrail
+proves a claim is *true* (grounded in a real bullet); it says nothing
+about whether that claim is actually *relevant to this posting* -- the
+model picks one accomplishment per the prompt, but nothing previously
+verified that choice against the JD itself. `_jd_keyword_set(jd_parsed)`
+tokenizes the JD's own `must_have_skills`/`nice_to_have`/`keywords`/
+`responsibilities`; if none of the draft's citation-bearing claims share
+a token with that set (checked against both the claim's own wording and
+its cited bullet's text, since the model may paraphrase away the literal
+term), a `validation_log` warning fires. Soft flag, not a hard drop --
+a real match can miss this via a synonym (resume says "Kafka," JD says
+"streaming systems"), so a false positive here means "worth a second
+look," not "this is wrong." Caught a real tokenizer bug before shipping:
+the first token regex absorbed trailing sentence punctuation ("Kafka."
+tokenized as one word, never matching "Kafka" from the JD side), which
+would have made the check fire as a false positive on nearly every real
+sentence -- fixed by requiring a trailing `.`/`-`/`#` to be followed by
+more alnum characters to count as part of a token. Verified live against
+the real Snowflake application: a hook mentioning "data quality
+validation" and "transformation stage" correctly matched the JD's own
+stated responsibilities and stayed silent (no false positive on genuinely
+relevant content); the mocked test suite separately confirms a
+citation to an unrelated bullet (e.g. an event-planning accomplishment
+against a backend-engineering JD) does trigger the flag.
 **Out:** `{subject, body_text, validation_log, model}`.
 **Backend (`POST /api/applications/{id}/draft-outreach`):** synchronous
 inline call (one `messages.parse`, same pattern as `find_application_contact`
