@@ -133,8 +133,11 @@ export default function ApplicationDetail() {
   const [savingStatus, setSavingStatus] = useState(false);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
   const [contactSearching, setContactSearching] = useState(false);
+  // Kept in state even after a contact is saved -- "See other options" reuses
+  // this without another Hunter.io call; only "Search again" fetches fresh.
   const [contactCandidates, setContactCandidates] = useState<ContactCandidate[] | null>(null);
   const [contactMessage, setContactMessage] = useState<string | null>(null);
+  const [showCandidates, setShowCandidates] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
 
   useEffect(() => {
@@ -175,6 +178,7 @@ export default function ApplicationDetail() {
       setContactCandidates([]);
     } finally {
       setContactSearching(false);
+      setShowCandidates(true);
     }
   }
 
@@ -195,8 +199,7 @@ export default function ApplicationDetail() {
         contact_source: candidate.source,
         contact_verified: candidate.verified ? 1 : 0,
       });
-      setContactCandidates(null);
-      setContactMessage(null);
+      setShowCandidates(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save contact");
     } finally {
@@ -282,40 +285,14 @@ export default function ApplicationDetail() {
       {preview && <PdfPreviewModal url={preview.url} title={preview.title} onClose={() => setPreview(null)} />}
 
       <Section title="Hiring contact">
-        {app.contact_email && contactCandidates === null ? (
-          <div className="flex items-center justify-between rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-[#e4e8f0]">{app.contact_name || "Unnamed contact"}</span>
-                <VerifiedBadge verified={!!app.contact_verified} />
-              </div>
-              <div className="mt-0.5 text-sm text-[#9db3c9]">{app.contact_email}</div>
-              <div className="mt-1 text-[11px] text-[#4a5468]">via {app.contact_source}</div>
-            </div>
-            <button
-              onClick={handleFindContact}
-              disabled={contactSearching}
-              className="text-xs text-[#6b7690] hover:text-[#4fd6f0] disabled:opacity-60"
-            >
-              {contactSearching ? "Searching…" : "Search again"}
-            </button>
-          </div>
-        ) : contactCandidates === null ? (
-          <button
-            onClick={handleFindContact}
-            disabled={contactSearching}
-            className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0] disabled:opacity-60"
-          >
-            <PersonIcon /> {contactSearching ? "Searching…" : "Find hiring contact"}
-          </button>
-        ) : (
+        {showCandidates ? (
           <div className="space-y-3">
             <p className="text-[11px] text-[#4a5468]">
               Generic company contacts from Hunter.io, not matched to this specific role — use the title below to
               judge relevance yourself.
             </p>
             {contactMessage && <p className="text-sm text-[#6b7690]">{contactMessage}</p>}
-            {contactCandidates.map((c, i) => (
+            {(contactCandidates ?? []).map((c, i) => (
               <div
                 key={i}
                 className="flex items-center justify-between rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-3.5"
@@ -338,12 +315,48 @@ export default function ApplicationDetail() {
               </div>
             ))}
             <button
-              onClick={() => setContactCandidates(null)}
+              onClick={() => setShowCandidates(false)}
               className="text-xs text-[#6b7690] hover:text-[#e4e8f0]"
             >
-              Cancel
+              {app.contact_email ? "Back" : "Cancel"}
             </button>
           </div>
+        ) : app.contact_email ? (
+          <div className="flex items-center justify-between rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-[#e4e8f0]">{app.contact_name || "Unnamed contact"}</span>
+                <VerifiedBadge verified={!!app.contact_verified} />
+              </div>
+              <div className="mt-0.5 text-sm text-[#9db3c9]">{app.contact_email}</div>
+              <div className="mt-1 text-[11px] text-[#4a5468]">via {app.contact_source}</div>
+            </div>
+            <div className="flex flex-shrink-0 items-center gap-4">
+              {contactCandidates && contactCandidates.length > 0 && (
+                <button
+                  onClick={() => setShowCandidates(true)}
+                  className="text-xs text-[#6b7690] hover:text-[#4fd6f0]"
+                >
+                  See other options
+                </button>
+              )}
+              <button
+                onClick={handleFindContact}
+                disabled={contactSearching}
+                className="text-xs text-[#6b7690] hover:text-[#4fd6f0] disabled:opacity-60"
+              >
+                {contactSearching ? "Searching…" : "Search again"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <button
+            onClick={handleFindContact}
+            disabled={contactSearching}
+            className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0] disabled:opacity-60"
+          >
+            <PersonIcon /> {contactSearching ? "Searching…" : "Find hiring contact"}
+          </button>
         )}
       </Section>
 
