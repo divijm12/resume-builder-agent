@@ -49,11 +49,66 @@ function DownloadIcon() {
   );
 }
 
+function PreviewIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path
+        d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PdfPreviewModal({ url, title, onClose }: { url: string; title: string; onClose: () => void }) {
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6"
+      onClick={onClose}
+    >
+      <div
+        className="flex h-full w-full max-w-4xl flex-col overflow-hidden rounded-lg border border-[#232b3a] bg-[#10141d]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-[#1c2431] px-4 py-3">
+          <span className="text-sm font-medium text-[#e4e8f0]">{title}</span>
+          <button
+            onClick={onClose}
+            className="rounded-md p-1 text-[#6b7690] hover:bg-[#1c2431] hover:text-[#e4e8f0]"
+          >
+            <CloseIcon />
+          </button>
+        </div>
+        <iframe src={url} title={title} className="flex-1 bg-white" />
+      </div>
+    </div>
+  );
+}
+
 export default function ApplicationDetail() {
   const { id } = useParams<{ id: string }>();
   const [app, setApp] = useState<ApplicationDetailType | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [savingStatus, setSavingStatus] = useState(false);
+  const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -113,44 +168,44 @@ export default function ApplicationDetail() {
         </select>
       </div>
 
-      <div className="mb-6 flex gap-3">
-        <a
-          href={fileUrl(app.id, "pdf")}
-          target="_blank"
-          rel="noreferrer"
+      <div className="mb-6 flex flex-wrap gap-3">
+        <button
+          onClick={() => setPreview({ url: fileUrl(app.id, "pdf"), title: `${app.company} — Resume` })}
           className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
         >
-          <DownloadIcon /> Open PDF
-        </a>
+          <PreviewIcon /> Preview Resume
+        </button>
         <a
           href={fileUrl(app.id, "docx")}
           target="_blank"
           rel="noreferrer"
           className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
         >
-          <DownloadIcon /> Open Word doc
+          <DownloadIcon /> Download Word doc
         </a>
         {app.cover_letter_path && (
           <>
-            <a
-              href={fileUrl(app.id, "cover_letter_pdf")}
-              target="_blank"
-              rel="noreferrer"
+            <button
+              onClick={() =>
+                setPreview({ url: fileUrl(app.id, "cover_letter_pdf"), title: `${app.company} — Cover Letter` })
+              }
               className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
             >
-              <DownloadIcon /> Open Cover Letter (PDF)
-            </a>
+              <PreviewIcon /> Preview Cover Letter
+            </button>
             <a
               href={fileUrl(app.id, "cover_letter_docx")}
               target="_blank"
               rel="noreferrer"
               className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
             >
-              <DownloadIcon /> Open Cover Letter (Word)
+              <DownloadIcon /> Download Cover Letter (Word)
             </a>
           </>
         )}
       </div>
+
+      {preview && <PdfPreviewModal url={preview.url} title={preview.title} onClose={() => setPreview(null)} />}
 
       {tr && (
         <>

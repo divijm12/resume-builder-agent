@@ -210,7 +210,13 @@ def get_application_file(app_id: int, type: str = "pdf"):
         "application/pdf" if wants_pdf
         else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
-    return FileResponse(str(file_path), media_type=media_type, filename=file_path.name)
+    # Starlette's FileResponse defaults Content-Disposition to "attachment"
+    # whenever `filename` is passed -- that's what was forcing a save-to-disk
+    # dialog for PDFs instead of letting the browser render them inline.
+    # docx has no native browser renderer either way, so a download is still
+    # the only sensible behavior there -- only PDFs get "inline".
+    disposition = "inline" if wants_pdf else "attachment"
+    return FileResponse(str(file_path), media_type=media_type, filename=file_path.name, content_disposition_type=disposition)
 
 
 @app.get("/api/health")
