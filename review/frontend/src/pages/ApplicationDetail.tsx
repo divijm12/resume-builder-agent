@@ -173,7 +173,7 @@ export default function ApplicationDetail() {
           onClick={() => setPreview({ url: fileUrl(app.id, "pdf"), title: `${app.company} — Resume` })}
           className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
         >
-          <PreviewIcon /> Preview Resume
+          <PreviewIcon /> Preview Resume (PDF)
         </button>
         <a
           href={fileUrl(app.id, "docx")}
@@ -181,7 +181,7 @@ export default function ApplicationDetail() {
           rel="noreferrer"
           className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
         >
-          <DownloadIcon /> Download Word doc
+          <DownloadIcon /> Download Resume (Word)
         </a>
         {app.cover_letter_path && (
           <>
@@ -191,7 +191,7 @@ export default function ApplicationDetail() {
               }
               className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
             >
-              <PreviewIcon /> Preview Cover Letter
+              <PreviewIcon /> Preview Cover Letter (PDF)
             </button>
             <a
               href={fileUrl(app.id, "cover_letter_docx")}
