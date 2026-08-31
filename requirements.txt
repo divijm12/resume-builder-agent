@@ -7,3 +7,4 @@ reportlab
 pypdf
 fastapi
 uvicorn[standard]
+requests

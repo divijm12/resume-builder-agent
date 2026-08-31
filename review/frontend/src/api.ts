@@ -66,6 +66,33 @@ export interface ApplicationDetail extends ApplicationSummary {
   notes: string | null;
   jd_parsed: JdParsed | null;
   tailor_result: TailorResult | null;
+  contact_name: string | null;
+  contact_email: string | null;
+  contact_source: string | null;
+  contact_verified: number | null;
+}
+
+/** A candidate hiring contact from Hunter.io -- generic to the company, not
+ * matched to a specific job opening (Hunter has no notion of "this role").
+ * `title` is shown so a human can judge relevance themselves. */
+export interface ContactCandidate {
+  name: string | null;
+  title: string | null;
+  email: string | null;
+  confidence: number | null;
+  /** True only when Hunter's own verification status is "valid" -- never
+   * true for "accept_all" or "unknown". */
+  verified: boolean;
+  verification_status: string | null;
+  decision_maker: boolean;
+  sources_count: number;
+  source: string;
+}
+
+export interface FindContactResult {
+  contacts: ContactCandidate[];
+  message: string | null;
+  error: string | null;
 }
 
 export const APPLICATION_STATUSES = [
@@ -131,9 +158,20 @@ export function getApplication(id: number): Promise<ApplicationDetail> {
 
 export function updateApplication(
   id: number,
-  updates: { status?: string; notes?: string },
+  updates: {
+    status?: string;
+    notes?: string;
+    contact_name?: string;
+    contact_email?: string;
+    contact_source?: string;
+    contact_verified?: boolean;
+  },
 ): Promise<{ ok: boolean }> {
   return request(`/api/applications/${id}`, { method: "PATCH", body: JSON.stringify(updates) });
+}
+
+export function findContact(id: number): Promise<FindContactResult> {
+  return request(`/api/applications/${id}/find-contact`, { method: "POST" });
 }
 
 export function fileUrl(id: number, type: "pdf" | "docx" | "cover_letter_pdf" | "cover_letter_docx"): string {

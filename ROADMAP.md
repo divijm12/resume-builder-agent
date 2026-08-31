@@ -38,12 +38,12 @@ Build in phases that are each independently useful — don't wait for the full p
 This phase matters more than it sounds — it's your actual edge over commercial tools.
 
 ## Phase 4 — Contact discovery (optional, higher effort/risk)
-- [ ] Integrate Hunter.io or Apollo.io API
-- [ ] Fallback: fetch company "team"/press pages directly
-- [ ] Confidence/verified flag surfaced clearly
-- [ ] Test on 10 companies, check false-positive rate by hand
+- [x] Integrate Hunter.io API -- Apollo.io turned out not to be viable: confirmed against their own pricing page that the free plan has no API access at all (gated behind a "Custom"/enterprise plan). Hunter's free plan does (50 credits/month) (`agents/find_contact.py`)
+- [ ] Fallback: fetch company "team"/press pages directly -- deliberately skipped for v1; every company site is structured differently, so a generic scraper would be fragile and often silently wrong. Revisit only if "Hunter found nothing" turns out to happen a lot in practice.
+- [x] Confidence/verified flag surfaced clearly -- `verified` is only ever `True` when Hunter's own status is `"valid"`, enforced in code; the UI shows a green "Verified" / amber "Unverified" badge per candidate, never blurring the distinction
+- [ ] Test on 10 companies, check false-positive rate by hand -- only tested on one real company (Anduril Industries) so far; worth doing a proper pass across several before trusting this at volume
 
-**Done when:** contact discovery returns verified-or-flagged results you'd trust to send to.
+**Done when:** contact discovery returns verified-or-flagged results you'd trust to send to. ✅ Core flow done 2026-08-30 -- a "Find hiring contact" button on the Application Detail page returns a ranked list of real candidates (name, title, email, confidence, verified/unverified), and a human picks which one (if any) to save; nothing is auto-selected or auto-sent. Known, accepted limitation: Hunter's results aren't matched to the specific role being applied for, just to the company overall -- see ARCHITECTURE.md Stage 5.
 
 ## Phase 5 — Outreach drafting + review queue
 - [ ] Outreach draft agent
@@ -63,4 +63,4 @@ This phase matters more than it sounds — it's your actual edge over commercial
 ## Suggested order of effort
 Phases 1–3 alone will already save you the most time and give you the data-driven edge. Phases 4–5 are valuable but carry real risk (email deliverability, verification quality) — build them once 1–3 are solid and you trust the tailoring output completely.
 
-**Current position (2026-08-30):** Phases 1 and 2 are both solid and well past their original bar. Phase 3 is logging/tracking-complete, its analytics item still deliberately waiting on more real usage (a handful of logged applications isn't enough volume for correlation queries to say anything meaningful). Phases 4-5 (contact discovery, outreach) remain the explicitly higher-risk next step per this roadmap's own stated order of effort — worth a deliberate conversation before starting, not a default next build.
+**Current position (2026-08-30):** Phases 1 and 2 are both solid and well past their original bar. Phase 3 is logging/tracking-complete, its analytics item still deliberately waiting on more real usage (a handful of logged applications isn't enough volume for correlation queries to say anything meaningful). Phase 4's core contact-discovery flow is now built and verified against one real company (Anduril) -- worth testing against a few more before fully trusting it at volume. Phase 5 (outreach drafting + send) is the only genuinely untouched phase now, and it's the one that starts touching real, external, hard-to-undo actions (drafting emails to real people, eventually a real send) -- worth a deliberate conversation before starting, not a default next build.

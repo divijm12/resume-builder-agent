@@ -30,6 +30,7 @@ from dotenv import load_dotenv
 load_dotenv(REPO_ROOT / ".env")
 
 import apply  # noqa: E402  (must follow sys.path insert)
+import find_contact  # noqa: E402  (agents/ is on sys.path via apply's own import above)
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -157,9 +158,31 @@ def get_application(app_id: int):
     return data
 
 
+@app.post("/api/applications/{app_id}/find-contact")
+def find_application_contact(app_id: int):
+    """Look up candidate hiring contacts for this application's company via
+    Hunter.io. Does NOT write anything to the DB -- a human picks which
+    contact, if any, is worth recording (PATCH /api/applications/{id} with
+    the chosen fields), same "human decides" pattern as the status dropdown."""
+    conn = _get_db()
+    try:
+        row = conn.execute("SELECT company FROM applications WHERE id = ?", (app_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(404, "application not found")
+    return find_contact.find_contacts(row["company"])
+
+
 class UpdateApplicationRequest(BaseModel):
     status: Optional[str] = None
     notes: Optional[str] = None
+    # Set together once a human picks one candidate from POST .../find-contact's
+    # results -- this endpoint never writes a contact itself, see that handler.
+    contact_name: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_source: Optional[str] = None
+    contact_verified: Optional[bool] = None
 
 
 @app.patch("/api/applications/{app_id}")

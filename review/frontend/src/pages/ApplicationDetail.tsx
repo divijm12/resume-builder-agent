@@ -3,9 +3,11 @@ import { Link, useParams } from "react-router-dom";
 import {
   APPLICATION_STATUSES,
   fileUrl,
+  findContact,
   getApplication,
   updateApplication,
   type ApplicationDetail as ApplicationDetailType,
+  type ContactCandidate,
 } from "../api";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -62,6 +64,27 @@ function PreviewIcon() {
   );
 }
 
+function PersonIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <circle cx="12" cy="8" r="4" />
+      <path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function VerifiedBadge({ verified }: { verified: boolean }) {
+  const c = verified ? TONE_COLORS.green : TONE_COLORS.amber;
+  return (
+    <span
+      className="rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+      style={{ background: c.bg, color: c.text, borderColor: c.border }}
+    >
+      {verified ? "Verified" : "Unverified"}
+    </span>
+  );
+}
+
 function CloseIcon() {
   return (
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -109,6 +132,10 @@ export default function ApplicationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [savingStatus, setSavingStatus] = useState(false);
   const [preview, setPreview] = useState<{ url: string; title: string } | null>(null);
+  const [contactSearching, setContactSearching] = useState(false);
+  const [contactCandidates, setContactCandidates] = useState<ContactCandidate[] | null>(null);
+  const [contactMessage, setContactMessage] = useState<string | null>(null);
+  const [savingContact, setSavingContact] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -127,6 +154,53 @@ export default function ApplicationDetail() {
       setError(err instanceof Error ? err.message : "Failed to update status");
     } finally {
       setSavingStatus(false);
+    }
+  }
+
+  async function handleFindContact() {
+    if (!app) return;
+    setContactSearching(true);
+    setContactMessage(null);
+    try {
+      const result = await findContact(app.id);
+      if (result.error) {
+        setContactMessage(result.error);
+        setContactCandidates([]);
+      } else {
+        setContactCandidates(result.contacts);
+        setContactMessage(result.message);
+      }
+    } catch (err) {
+      setContactMessage(err instanceof Error ? err.message : "Failed to search for a contact");
+      setContactCandidates([]);
+    } finally {
+      setContactSearching(false);
+    }
+  }
+
+  async function handleUseContact(candidate: ContactCandidate) {
+    if (!app || !candidate.email) return;
+    setSavingContact(true);
+    try {
+      await updateApplication(app.id, {
+        contact_name: candidate.name ?? undefined,
+        contact_email: candidate.email,
+        contact_source: candidate.source,
+        contact_verified: candidate.verified,
+      });
+      setApp({
+        ...app,
+        contact_name: candidate.name,
+        contact_email: candidate.email,
+        contact_source: candidate.source,
+        contact_verified: candidate.verified ? 1 : 0,
+      });
+      setContactCandidates(null);
+      setContactMessage(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to save contact");
+    } finally {
+      setSavingContact(false);
     }
   }
 
@@ -206,6 +280,72 @@ export default function ApplicationDetail() {
       </div>
 
       {preview && <PdfPreviewModal url={preview.url} title={preview.title} onClose={() => setPreview(null)} />}
+
+      <Section title="Hiring contact">
+        {app.contact_email && contactCandidates === null ? (
+          <div className="flex items-center justify-between rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-[#e4e8f0]">{app.contact_name || "Unnamed contact"}</span>
+                <VerifiedBadge verified={!!app.contact_verified} />
+              </div>
+              <div className="mt-0.5 text-sm text-[#9db3c9]">{app.contact_email}</div>
+              <div className="mt-1 text-[11px] text-[#4a5468]">via {app.contact_source}</div>
+            </div>
+            <button
+              onClick={handleFindContact}
+              disabled={contactSearching}
+              className="text-xs text-[#6b7690] hover:text-[#4fd6f0] disabled:opacity-60"
+            >
+              {contactSearching ? "Searching…" : "Search again"}
+            </button>
+          </div>
+        ) : contactCandidates === null ? (
+          <button
+            onClick={handleFindContact}
+            disabled={contactSearching}
+            className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0] disabled:opacity-60"
+          >
+            <PersonIcon /> {contactSearching ? "Searching…" : "Find hiring contact"}
+          </button>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-[11px] text-[#4a5468]">
+              Generic company contacts from Hunter.io, not matched to this specific role — use the title below to
+              judge relevance yourself.
+            </p>
+            {contactMessage && <p className="text-sm text-[#6b7690]">{contactMessage}</p>}
+            {contactCandidates.map((c, i) => (
+              <div
+                key={i}
+                className="flex items-center justify-between rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-3.5"
+              >
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium text-[#e4e8f0]">{c.name || "Unknown name"}</span>
+                    <VerifiedBadge verified={c.verified} />
+                  </div>
+                  <div className="mt-0.5 text-xs text-[#9db3c9]">{c.title || "Title unknown"}</div>
+                  <div className="mt-0.5 font-mono text-xs text-[#6b7690]">{c.email}</div>
+                </div>
+                <button
+                  onClick={() => handleUseContact(c)}
+                  disabled={savingContact}
+                  className="flex-shrink-0 rounded-md border border-[#232b3a] px-3 py-1.5 text-xs font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0] disabled:opacity-60"
+                >
+                  Use this contact
+                </button>
+              </div>
+            ))}
+            <button
+              onClick={() => setContactCandidates(null)}
+              className="text-xs text-[#6b7690] hover:text-[#e4e8f0]"
+            >
+              Cancel
+            </button>
+          </div>
+        )}
+      </Section>
 
       {tr && (
         <>

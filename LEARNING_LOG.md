@@ -568,4 +568,44 @@ how the sentence itself could be written.
 
 ---
 
+## 13. Contact discovery: checking a premise before writing a line of code
+
+CLAUDE.md had said "Hunter.io or Apollo.io" since Phase 0, as if they were
+interchangeable options. Before writing `agents/find_contact.py`, both
+providers' actual pricing pages got checked directly instead of trusting
+that old assumption — and it turned out to be wrong. Apollo's free plan
+has *no API access at all*; it's gated behind a "Custom" enterprise plan
+you'd have to talk to a salesperson to even price. Hunter's free plan
+does include real API access — 50 credits a month, confirmed by calling
+its account-info endpoint with a real key before writing anything else.
+This is the same discipline as the Tsenta research back in section 8:
+a plan written down early in a project is a snapshot of what seemed true
+*then*, not a guarantee. The five minutes it took to check saved a much
+worse five minutes of building against a provider that wasn't usable.
+
+**Why nothing here gets auto-selected.** Hunter's Domain Search doesn't
+know what job you're applying for — it returns real people it's found
+associated with a company's domain, with their real titles, and nothing
+more. It might hand back a VP of Sales as confidently as an actual
+recruiter. So the design never picks one automatically: `find_contacts()`
+returns a full ranked list, the UI shows every candidate's title so you
+can judge relevance yourself, and only `PATCH /api/applications/{id}`
+(a deliberate button click) ever writes one onto an application. This is
+the same "human decides" shape as the status dropdown, applied to a new
+kind of data — the tool surfaces information, it doesn't make the call.
+
+**The one thing that *is* enforced in code, not left to a badge to get
+right:** Hunter's own response already grades each email's deliverability
+as `valid`, `accept_all`, or `unknown`. It would have been easy to treat
+"Hunter found this email" as good enough and label everything found as
+verified. Instead, `verified` is `True` only for `valid` — `accept_all`
+(the mail server accepts anything sent to that domain, so a hit there
+doesn't actually confirm this one address belongs to this one person) and
+`unknown` both come back `False`. CLAUDE.md's hard rule 3 says "flag
+unverified contacts clearly, don't silently treat them as equal to
+verified ones" — that's not a UI copywriting concern, it's a data
+mapping that the code enforces before the badge ever gets a chance to lie.
+
+---
+
 *(more entries added as this project continues)*
