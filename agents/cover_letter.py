@@ -31,10 +31,21 @@ claim, so that risk leans on prompting (ground every substantive claim in
 a citation) plus the fact that this only ever produces a draft -- nothing
 in this pipeline sends anything without manual review (CLAUDE.md hard
 rule 2).
+
+Writing-style guardrail (user-specified): no em dashes, and avoid the
+broader tells of AI-generated prose (stock phrases, tricolon lists,
+uniformly-polished sentence rhythm) in favor of something that reads as
+one specific person's voice. The "no em dash" half is mechanically
+checkable, so it isn't left to the prompt alone -- _strip_em_dashes()
+replaces any that slip through with a comma and logs the fix, same
+"don't just trust the prompt for anything checkable" pattern as
+tailor.py. The broader "sounds human, not generated" half has no
+code-level check (there isn't one), so it stays prompt-governed.
 """
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import List
@@ -63,6 +74,22 @@ SYSTEM_PROMPT = (
     "goal is a letter a recruiter would actually enjoy reading and remember, not "
     "one that restates the resume's bullets in sentence form. Be specific and "
     "confident, not generic ('hardworking team player') or falsely modest.\n\n"
+    "Avoid every tell of AI-generated writing. Never use an em dash (the '--' "
+    "or '—' character) anywhere -- use a period, comma, or semicolon "
+    "instead; rewrite the sentence rather than reach for a dash to join two "
+    "clauses. Do not lean on tricolon lists ('I instrument, measure, and "
+    "validate'; 'clear, concise, and actionable') -- one or two of these in a "
+    "whole letter is fine, a pattern of them reads as generated. Avoid stock "
+    "phrases like 'I'm excited/passionate/energized about', 'What excites me "
+    "about this role is', 'I would welcome the opportunity to', or any "
+    "sentence that could be copy-pasted into a different candidate's letter "
+    "for a different company without changing a word. Vary sentence length on "
+    "purpose -- follow a longer sentence with a short, plain one; don't let "
+    "every sentence land at the same polished medium length. Include at least "
+    "one small, specific, personal-feeling detail or observation (a genuine "
+    "reaction, a specific reason something clicked) rather than only "
+    "restating credentials -- something that reads like it came from this "
+    "one candidate, not a template with the nouns swapped.\n\n"
     "Every claim that states a specific fact, number, or named skill must cite "
     "the tailored resume bullet id(s) it's drawn from in source_bullet_ids. "
     "Generic connective sentences -- an opening hook, a transition, a closing "
@@ -82,6 +109,20 @@ class CoverLetterClaim(BaseModel):
 
 class CoverLetterDraft(BaseModel):
     paragraphs: List[List[CoverLetterClaim]]
+
+
+_EM_DASH_RE = re.compile(r"\s*(?:--|—)\s*")
+
+
+def _strip_em_dashes(text: str) -> str:
+    """Replace an em dash (or its ASCII '--' substitute) with a comma --
+    a blunt but always-grammatically-safe substitution, since properly
+    splitting into two sentences would need sentence-boundary/recapitalization
+    logic this doesn't attempt. Backstop for the prompt's 'never use an em
+    dash' rule -- prompt-only enforcement of a mechanically checkable pattern
+    hasn't held reliably anywhere else in this project (see tailor.py's
+    diff_summary fixes), so it doesn't get trusted here either."""
+    return _EM_DASH_RE.sub(", ", text)
 
 
 def _bullet_lookup(tailored_resume: dict) -> dict:
@@ -132,7 +173,10 @@ def validate_and_build(draft: dict, tailored_resume: dict) -> dict:
                 )
                 continue
 
-            surviving.append(text)
+            cleaned = _strip_em_dashes(text)
+            if cleaned != text:
+                warnings.append(f"Stripped an em dash from a claim: {text!r} -> {cleaned!r}")
+            surviving.append(cleaned)
 
         if surviving:
             final_paragraphs.append(" ".join(surviving))
