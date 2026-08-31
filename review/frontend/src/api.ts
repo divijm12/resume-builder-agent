@@ -80,6 +80,13 @@ export interface ContactCandidate {
   title: string | null;
   email: string | null;
   confidence: number | null;
+  /** Hunter's own department bucket for this person (e.g. "hr", "it"),
+   * or null if Hunter didn't have one. */
+  department: string | null;
+  /** Set only when this contact is a recruiter or in the department the
+   * role likely reports into (e.g. "Recruiting", "Engineering/IT") --
+   * null for every other contact, which is still shown, just unlabeled. */
+  relevance_label: string | null;
   /** True only when Hunter's own verification status is "valid" -- never
    * true for "accept_all" or "unknown". */
   verified: boolean;

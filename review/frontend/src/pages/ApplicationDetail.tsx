@@ -23,6 +23,7 @@ const TONE_COLORS = {
   green: { bg: "#0f2a1e", text: "#4ade80", border: "#1a4230" },
   red: { bg: "#2a1416", text: "#f87171", border: "#432026" },
   amber: { bg: "#2a2410", text: "#f2c94c", border: "#433a1a" },
+  blue: { bg: "#0f2029", text: "#4fd6f0", border: "#1a3a43" },
 };
 
 function Pills({ items, tone }: { items: string[]; tone: "green" | "red" | "amber" }) {
@@ -81,6 +82,18 @@ function VerifiedBadge({ verified }: { verified: boolean }) {
       style={{ background: c.bg, color: c.text, borderColor: c.border }}
     >
       {verified ? "Verified" : "Unverified"}
+    </span>
+  );
+}
+
+function RelevanceBadge({ label }: { label: string }) {
+  const c = TONE_COLORS.blue;
+  return (
+    <span
+      className="rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide"
+      style={{ background: c.bg, color: c.text, borderColor: c.border }}
+    >
+      {label}
     </span>
   );
 }
@@ -296,8 +309,8 @@ export default function ApplicationDetail() {
         {showCandidates ? (
           <div className="space-y-3">
             <p className="text-[11px] text-[#4a5468]">
-              Generic company contacts from Hunter.io, not matched to this specific role — use the title below to
-              judge relevance yourself.
+              Contacts from Hunter.io for this company. Recruiters and people in a department close to this role are
+              boosted to the top and labeled below — everyone else is still shown, just unlabeled.
             </p>
             {contactMessage && <p className="text-sm text-[#6b7690]">{contactMessage}</p>}
             {(contactCandidates ?? []).map((c, i) => (
@@ -309,6 +322,7 @@ export default function ApplicationDetail() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium text-[#e4e8f0]">{c.name || "Unknown name"}</span>
                     <VerifiedBadge verified={c.verified} />
+                    {c.relevance_label && <RelevanceBadge label={c.relevance_label} />}
                   </div>
                   <div className="mt-0.5 text-xs text-[#9db3c9]">{c.title || "Title unknown"}</div>
                   <div className="mt-0.5 font-mono text-xs text-[#6b7690]">{c.email}</div>

@@ -608,4 +608,49 @@ mapping that the code enforces before the badge ever gets a chance to lie.
 
 ---
 
+## 14. Surfacing relevance without hiding anything
+
+After using contact discovery for real, a reasonable question came up:
+could it surface recruiters or people on the actual hiring team, instead
+of just whoever Hunter happens to have on file for a company? The first
+instinct — write a keyword matcher that guesses relevance from a person's
+free-text job title — was already considered and rejected back in
+section 13, because a fragile string-matcher on arbitrary titles ("Head
+of Factory Systems"? "Director — Simulation"?) can quietly misrank things
+worse than doing nothing at all.
+
+But the situation had actually changed: Hunter's own response turned out
+to already include a `department` field — not a guess extracted from free
+text, but a value Hunter itself assigns from a fixed, documented list of
+19 buckets (`it`, `hr`, `product`, `sales`, and so on). That's real
+structured data, not a fragile heuristic, so the earlier rejection didn't
+apply anymore. This is the same lesson as section 13's Apollo/Hunter
+premise-check, pointed at code instead of a provider choice: re-examine a
+past "no" when the facts underneath it have actually changed, rather than
+either reflexively repeating the old decision or reflexively reversing it
+without checking why it was made.
+
+What got built instead is a small, bounded keyword table — the job title
+on *this* application (e.g. "Backend Software Engineer") maps onto
+Hunter's *own* 19-value vocabulary (roughly: engineer/developer/backend
+-> `it`, product manager -> `product`, and so on), never onto arbitrary
+open-ended text. Contacts tagged `hr` (recruiters) or matching that
+inferred department get a label and sort to the top. Everyone else keeps
+their raw `department` and no label, but stays in the list. Nothing is
+filtered out — a design choice confirmed explicitly rather than assumed,
+because a hard filter risks making a company's contact list look emptier
+than it really is whenever Hunter's data happens not to tag anyone in the
+matching department. Boosting can only ever help; filtering can silently
+hide the one contact worth reaching out to.
+
+Verified live against Anduril Industries with role title "Backend
+Software Engineer": the two contacts Hunter had tagged `it` (a "Head of
+Factory Systems" and a "Chief Engineer" — titles a keyword-on-title
+matcher would likely have missed or mismatched) came back labeled
+"Engineering/IT" and sorted above eight other real, verified contacts in
+sales, product, operations, and management — all still visible, just
+lower in the list.
+
+---
+
 *(more entries added as this project continues)*

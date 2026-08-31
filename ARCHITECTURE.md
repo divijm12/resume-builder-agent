@@ -162,8 +162,9 @@ a "Custom"/enterprise plan; some sources cite $119+/month minimum), while
 **Hunter's free plan does** (50 credits/month, no expiration, confirmed
 live against a real key). CLAUDE.md hard rule 3 applies regardless of
 provider: no LinkedIn scraping, ever.
-**In:** company name (from the application's own `company` column).
-**Out:** `{contacts: [{name, title, email, confidence, verified, verification_status, decision_maker, sources_count, source}], message, error}`
+**In:** company name + role title (from the application's own `company`
+and `role_title` columns).
+**Out:** `{contacts: [{name, title, email, confidence, department, relevance_label, verified, verification_status, decision_maker, sources_count, source}], message, error}`
 -- a *ranked list*, not a single pick; a human chooses which one (if any)
 is worth recording, same "human decides" pattern as the status dropdown.
 Uses Hunter's Domain Search endpoint, which accepts a **plain company
@@ -176,14 +177,22 @@ Hunter's own status is `"valid"` -- `"accept_all"` (the domain accepts
 mail to *any* address, so a hit there doesn't confirm this specific
 person) and `"unknown"` both map to `False`. There is no code path that
 can mark a contact verified without Hunter itself having confirmed it.
-**Known limitation, not job-specific:** Hunter has no notion of the role
-being applied for -- it returns whoever it has found associated with that
-company's domain across the public web, which may skew toward people with
-more public presence (execs, sales, PR) rather than actual recruiters or
-hiring managers. Each candidate's real `title` is shown precisely so a
-human can judge relevance themselves; there's no keyword-based re-ranking
-by role relevance (deliberately -- a fragile keyword matcher could quietly
-misrank things worse than a plain confidence sort).
+**Relevance boost (added 2026-08-31):** Hunter has no notion of the *role*
+being applied for, but each returned person does carry a `department` from
+Hunter's own fixed, documented vocabulary (`hr`, `it`, `product`, `sales`,
+...19 values total). `_infer_target_department()` maps the application's
+`role_title` onto that same vocabulary via a small, explicit keyword table
+(e.g. "software engineer" -> `it`, "product manager" -> `product`) --
+bounded to 19 known values, not an open-ended guess. Contacts in `hr`
+(recruiters) or the inferred target department get a `relevance_label`
+(e.g. `"Recruiting"`, `"Engineering/IT"`) and sort to the top; everyone
+else keeps `relevance_label: null` but is still returned -- **boost, never
+filter**, per explicit user preference: a hard filter could make the list
+look emptier than it really is on a company whose Hunter data doesn't
+happen to tag anyone in the matching department. Each candidate's real
+`title` is still shown too, so a human can judge relevance themselves on
+top of the label. No role_title -> no boost, plain confidence sort, same
+as before this feature existed.
 **No scraping fallback in v1:** CLAUDE.md's original plan named "fetch
 company team/press pages directly" as a fallback when Hunter finds
 nothing. Deliberately out of scope for now -- every company site is
@@ -197,7 +206,7 @@ instead of guessing from a scrape.
 **Notes:** drafts only. Lands in a review queue.
 
 ### Stage 7 — Review Queue (human checkpoint)
-Built 2026-08-28 as a full web app (`review/backend/` + `review/frontend/`), not the originally-planned CLI — the user wanted a real trigger-and-review interface, not a read-only list. **In:** `POST /api/jobs {jd_text, company?, role?, tailor_model?, mode?, generate_cover_letter?}` on the FastAPI backend, which runs `apply.py`'s pipeline as a `BackgroundTasks` job (never blocks the request — the pipeline takes up to ~1min across 4-5 sequential Anthropic calls) and reports live per-stage progress via an in-memory job store, polled by the frontend at `GET /api/jobs/{id}`. **Model split (added 2026-08-30):** `tailor_model` only selects the model for the tailoring stage (and the cover letter stage, when requested) — ingest and both scoring calls always run on a fixed fast model regardless, per `apply.py`'s `run_pipeline` docstring; switching to Sonnet used to mean 4 slow calls, this way it's 1. **Cover letter (added 2026-08-30):** `generate_cover_letter` defaults to off (one more paid call, so it's opt-in per run); `GET /api/applications/{id}/file` gained `type=cover_letter_pdf|cover_letter_docx` alongside the existing `pdf|docx`, both deriving from the (only-when-generated) `cover_letter_path` column the same way the resume types already derive from `resume_variant_path`. **Contact discovery (added 2026-08-30):** `POST /api/applications/{id}/find-contact` looks up that application's `company` and calls Stage 5, returning the ranked candidate list without writing anything — `PATCH /api/applications/{id}` (the same endpoint the status dropdown already used) gained optional `contact_name`/`contact_email`/`contact_source`/`contact_verified` fields so the frontend can save whichever candidate a human picks. **Out:** a React app (Vite + TypeScript + Tailwind) with three views — `/new` (paste JD, pick tailoring model/mode, optionally request a cover letter, watch progress, auto-redirects to the result), `/` (applications list), `/applications/:id` (score before/after, hard gaps, red flags, matched skills, diff summary, PDF/docx download links for the resume and, when generated, the cover letter, a "Find hiring contact" flow, status dropdown wired to `PATCH /api/applications/{id}`). Sending is still never automated — this stage only reviews/tracks what `apply.py` already generated. See `LEARNING_LOG.md` sections 4, 6, and 7 for the reasoning behind the async job design and a from-first-principles explanation of the web/React concepts involved.
+Built 2026-08-28 as a full web app (`review/backend/` + `review/frontend/`), not the originally-planned CLI — the user wanted a real trigger-and-review interface, not a read-only list. **In:** `POST /api/jobs {jd_text, company?, role?, tailor_model?, mode?, generate_cover_letter?}` on the FastAPI backend, which runs `apply.py`'s pipeline as a `BackgroundTasks` job (never blocks the request — the pipeline takes up to ~1min across 4-5 sequential Anthropic calls) and reports live per-stage progress via an in-memory job store, polled by the frontend at `GET /api/jobs/{id}`. **Model split (added 2026-08-30):** `tailor_model` only selects the model for the tailoring stage (and the cover letter stage, when requested) — ingest and both scoring calls always run on a fixed fast model regardless, per `apply.py`'s `run_pipeline` docstring; switching to Sonnet used to mean 4 slow calls, this way it's 1. **Cover letter (added 2026-08-30):** `generate_cover_letter` defaults to off (one more paid call, so it's opt-in per run); `GET /api/applications/{id}/file` gained `type=cover_letter_pdf|cover_letter_docx` alongside the existing `pdf|docx`, both deriving from the (only-when-generated) `cover_letter_path` column the same way the resume types already derive from `resume_variant_path`. **Contact discovery (added 2026-08-30, relevance boost added 2026-08-31):** `POST /api/applications/{id}/find-contact` looks up that application's `company` and `role_title` and calls Stage 5, returning the ranked candidate list (recruiters/team-relevant contacts boosted to the top and labeled) without writing anything — `PATCH /api/applications/{id}` (the same endpoint the status dropdown already used) gained optional `contact_name`/`contact_email`/`contact_source`/`contact_verified` fields so the frontend can save whichever candidate a human picks. **Out:** a React app (Vite + TypeScript + Tailwind) with three views — `/new` (paste JD, pick tailoring model/mode, optionally request a cover letter, watch progress, auto-redirects to the result), `/` (applications list), `/applications/:id` (score before/after, hard gaps, red flags, matched skills, diff summary, PDF/docx download links for the resume and, when generated, the cover letter, a "Find hiring contact" flow, status dropdown wired to `PATCH /api/applications/{id}`). Sending is still never automated — this stage only reviews/tracks what `apply.py` already generated. See `LEARNING_LOG.md` sections 4, 6, and 7 for the reasoning behind the async job design and a from-first-principles explanation of the web/React concepts involved.
 
 ### Orchestrator — `apply.py`
 Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refers to. Agents (`agents/*.py`) stay pure (JSON in, JSON out, no side effects); `apply.py` is what actually chains ingest → score → tailor → render and owns the file/DB persistence those stages don't do themselves. Built 2026-08-28 specifically to close the gap between hard rule 4 ("log the application in `applications.db` immediately after generation") being written down from Phase 0 and actually being implemented — nothing wrote to `applications.db` before this existed. `run_pipeline()` auto-extracts company/role from the parsed JD (`--company`/`--role` override if the JD doesn't state one or extraction is wrong) and calls `log_application()` right after rendering, inserting one `applications` row (status defaults to `'drafted'`) and one `resume_versions` row (`diff_from_master` = the tailoring stage's `diff_summary`, JSON-encoded). `match_score` logged is `score_after` (the tailored resume's score), not `score_before` — the row should reflect what's actually being submitted.

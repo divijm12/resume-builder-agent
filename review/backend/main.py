@@ -163,15 +163,23 @@ def find_application_contact(app_id: int):
     """Look up candidate hiring contacts for this application's company via
     Hunter.io. Does NOT write anything to the DB -- a human picks which
     contact, if any, is worth recording (PATCH /api/applications/{id} with
-    the chosen fields), same "human decides" pattern as the status dropdown."""
+    the chosen fields), same "human decides" pattern as the status dropdown.
+
+    Passes this application's role_title through so find_contacts() can
+    boost recruiters/team-relevant contacts to the top -- see
+    agents/find_contact.py's module docstring. This is ranking/labeling
+    only: it is never sent to Hunter as a filter, so the full candidate
+    list is always what's returned."""
     conn = _get_db()
     try:
-        row = conn.execute("SELECT company FROM applications WHERE id = ?", (app_id,)).fetchone()
+        row = conn.execute(
+            "SELECT company, role_title FROM applications WHERE id = ?", (app_id,)
+        ).fetchone()
     finally:
         conn.close()
     if row is None:
         raise HTTPException(404, "application not found")
-    return find_contact.find_contacts(row["company"])
+    return find_contact.find_contacts(row["company"], role_title=row["role_title"])
 
 
 class UpdateApplicationRequest(BaseModel):
