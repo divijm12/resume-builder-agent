@@ -8,14 +8,24 @@ const STAGE_LABELS: Record<string, string> = {
   ingesting: "Parsing the job description…",
   scoring: "Scoring your resume against it…",
   tailoring: "Tailoring your resume (and rescoring it)…",
+  cover_letter: "Writing a cover letter…",
   rendering: "Rendering PDF + Word…",
   logging: "Saving to your application history…",
 };
 
-const STAGES: { key: string; label: string }[] = [
+const BASE_STAGES: { key: string; label: string }[] = [
   { key: "ingesting", label: "Ingest" },
   { key: "scoring", label: "Score" },
   { key: "tailoring", label: "Tailor" },
+  { key: "rendering", label: "Render" },
+  { key: "logging", label: "Log" },
+];
+
+const STAGES_WITH_COVER_LETTER: { key: string; label: string }[] = [
+  { key: "ingesting", label: "Ingest" },
+  { key: "scoring", label: "Score" },
+  { key: "tailoring", label: "Tailor" },
+  { key: "cover_letter", label: "Cover Letter" },
   { key: "rendering", label: "Render" },
   { key: "logging", label: "Log" },
 ];
@@ -88,6 +98,7 @@ export default function NewApplication() {
   const [role, setRole] = useState("");
   const [tailorModel, setTailorModel] = useState(MODELS[0].value);
   const [mode, setMode] = useState<"honest" | "aggressive">("aggressive");
+  const [wantCoverLetter, setWantCoverLetter] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationSummary[] | null>(null);
@@ -107,6 +118,7 @@ export default function NewApplication() {
   }, [job, navigate]);
 
   const submitting = jobId !== null && job?.status !== "error";
+  const STAGES = wantCoverLetter ? STAGES_WITH_COVER_LETTER : BASE_STAGES;
   const currentStageIndex = job ? STAGES.findIndex((s) => s.key === job.stage) : -1;
 
   const stats = applications
@@ -136,6 +148,7 @@ export default function NewApplication() {
         role: role || undefined,
         tailor_model: tailorModel,
         mode,
+        generate_cover_letter: wantCoverLetter,
       });
       setJobId(job_id);
     } catch (err) {
@@ -265,6 +278,36 @@ export default function NewApplication() {
                 Only affects tailoring -- parsing and scoring always run on a fast, fixed model.
               </div>
             </div>
+
+            <button
+              type="button"
+              disabled={submitting}
+              onClick={() => setWantCoverLetter((v) => !v)}
+              className={`rounded-lg border p-4 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${
+                wantCoverLetter ? "border-[#4fd6f0] bg-[#10202a]" : "border-[#232b3a] bg-[#0c0f16]"
+              }`}
+            >
+              <div className="flex items-center justify-between">
+                <span className={`text-sm font-semibold ${wantCoverLetter ? "text-[#e4e8f0]" : "text-[#6b7690]"}`}>
+                  Also generate a cover letter
+                </span>
+                <span
+                  className="relative block h-[18px] w-[34px] flex-shrink-0 rounded-full"
+                  style={{ background: wantCoverLetter ? "#4fd6f0" : "#1c2431" }}
+                >
+                  <span
+                    className="absolute top-[2px] h-[14px] w-[14px] rounded-full"
+                    style={{
+                      background: wantCoverLetter ? "#0c0f16" : "#4a5468",
+                      left: wantCoverLetter ? "18px" : "2px",
+                    }}
+                  />
+                </span>
+              </div>
+              <div className={`mt-1 text-xs leading-relaxed ${wantCoverLetter ? "text-[#9db3c9]" : "text-[#4a5468]"}`}>
+                Off by default -- one more API call, grounded in the tailored resume.
+              </div>
+            </button>
           </div>
         </div>
 

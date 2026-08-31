@@ -23,11 +23,11 @@ Build in phases that are each independently useful — don't wait for the full p
 **Done when:** you paste a JD and get a tailored, honest resume + score in under a minute. ✅ Done 2026-08-28 — `apply.py` does this in one command. Hardened well past that bar since — see LEARNING_LOG.md sections 8–11 for the fabrication/scoring bugs found and fixed along the way.
 
 ## Phase 2 — Cover letters
-- [ ] Cover letter agent, same JD input
-- [ ] Render to docx/pdf
-- [ ] Test against Phase 1 outputs on the same JDs
+- [x] Cover letter agent, same JD input -- built off the tailored resume, not the master resume, so its emphasis matches what got tailored for this JD (`agents/cover_letter.py`)
+- [x] Render to docx/pdf (`render_cover_letter_docx`/`_pdf`, same Calibri/one-page infrastructure as the resume)
+- [x] Test against Phase 1 outputs on the same JDs -- verified with a real J&J JD: every specific claim in the generated letter traced back word-for-word to real tailored-resume bullets, genuine opening hook (not the banned cliché), one-page PDF/docx both rendered cleanly
 
-**Done when:** tailored resume + cover letter both come out of one JD paste.
+**Done when:** tailored resume + cover letter both come out of one JD paste. ✅ Done 2026-08-30 -- opt-in per run (a checkbox/`--cover-letter` flag), not automatic, since it's one more paid API call. Free-form prose has no "known-good original" to revert a bad claim to the way a resume bullet does, so the guardrail design here is new: the model cites which tailored-resume bullet(s) ground each claim, and code verifies every number against the citation, dropping (not rewriting) anything that fails -- see ARCHITECTURE.md Stage 4 and LEARNING_LOG.md for the full design and its one honest limitation (named-skill fabrication isn't hard-blocked, same class of gap as tailor.py's turfgrass case).
 
 ## Phase 3 — Tracking loop
 - [x] Every generated application writes a row to `applications.db` — `apply.py` logs an `applications` row + `resume_versions` row immediately after rendering, per CLAUDE.md hard rule 4
@@ -63,4 +63,4 @@ This phase matters more than it sounds — it's your actual edge over commercial
 ## Suggested order of effort
 Phases 1–3 alone will already save you the most time and give you the data-driven edge. Phases 4–5 are valuable but carry real risk (email deliverability, verification quality) — build them once 1–3 are solid and you trust the tailoring output completely.
 
-**Current position (2026-08-30):** Phase 1 is solid and well past its original bar; Phase 3 is logging/tracking-complete, its analytics item deliberately waiting on more real usage. Phase 2 (cover letters) is the natural next build — same proven pipeline shape, immediately useful, no dependency on accumulated data the way Phase 3's queries or Phase 6's A/B suggestions are.
+**Current position (2026-08-30):** Phases 1 and 2 are both solid and well past their original bar. Phase 3 is logging/tracking-complete, its analytics item still deliberately waiting on more real usage (a handful of logged applications isn't enough volume for correlation queries to say anything meaningful). Phases 4-5 (contact discovery, outreach) remain the explicitly higher-risk next step per this roadmap's own stated order of effort — worth a deliberate conversation before starting, not a default next build.

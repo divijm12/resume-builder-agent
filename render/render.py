@@ -86,6 +86,18 @@ def _format_month_year(date_str):
     return s
 
 
+MONTH_FULL = {
+    1: "January", 2: "February", 3: "March", 4: "April", 5: "May", 6: "June",
+    7: "July", 8: "August", 9: "September", 10: "October", 11: "November", 12: "December",
+}
+
+
+def _format_full_date(d: date) -> str:
+    """date(2026, 8, 30) -> 'August 30, 2026' -- a cover letter's date line
+    uses the full, unabbreviated form, unlike resume section dates."""
+    return f"{MONTH_FULL[d.month]} {d.day}, {d.year}"
+
+
 def _format_dates(start, end):
     if not start:
         return ""
@@ -289,6 +301,88 @@ def render_docx(tailored_resume: dict, output_path: Path, margin_in: float = 0.4
     doc.save(str(output_path))
 
 
+def _cover_letter_docx_sizes(scale: float) -> dict:
+    return {
+        "name": 20 * scale,
+        "contact": 9.5 * scale,
+        "body": 10.5 * scale,
+        "contact_space_after": 12 * scale,
+        "para_space_after": 10 * scale,
+    }
+
+
+def render_cover_letter_docx(
+    basics: dict, company: str, cover_letter_text: str, output_path: Path, margin_in: float = 0.75, scale: float = 1.0
+) -> None:
+    """Same header identity as the resume (centered name + contact line) so
+    the two documents read as a matched pair, then a standard business
+    letter: date, generic salutation (no named recipient -- contact
+    discovery isn't built, and a fabricated name would violate the same
+    no-fabrication rule the content itself follows), body paragraphs (split
+    on the blank-line breaks cover_letter.py's output already uses), sign-off."""
+    doc = Document()
+    sizes = _cover_letter_docx_sizes(scale)
+    margin = Inches(margin_in)
+
+    style = doc.styles["Normal"]
+    style.font.name = FONT_NAME
+    style.font.size = Pt(sizes["body"])
+    for section in doc.sections:
+        section.page_width = PAGE_WIDTH
+        section.page_height = PAGE_HEIGHT
+        section.left_margin = margin
+        section.right_margin = margin
+        section.top_margin = Inches(max(0.3, margin_in - 0.1))
+        section.bottom_margin = Inches(max(0.3, margin_in - 0.1))
+
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(basics.get("name", ""))
+    _set_font(run, size=Pt(sizes["name"]), bold=True)
+    p.paragraph_format.space_after = Pt(2 * scale)
+
+    contact_parts = [x for x in [basics.get("phone"), basics.get("email")] if x]
+    links = basics.get("links", {}) or {}
+    for key in ("linkedin", "github", "portfolio"):
+        if links.get(key):
+            contact_parts.append(links[key])
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    run = p.add_run(" | ".join(contact_parts))
+    _set_font(run, size=Pt(sizes["contact"]))
+    p.paragraph_format.space_after = Pt(sizes["contact_space_after"])
+
+    p = doc.add_paragraph()
+    run = p.add_run(_format_full_date(date.today()))
+    _set_font(run, size=Pt(sizes["body"]))
+    p.paragraph_format.space_after = Pt(sizes["para_space_after"])
+
+    p = doc.add_paragraph()
+    run = p.add_run(f"Dear {company} Hiring Team,")
+    _set_font(run, size=Pt(sizes["body"]))
+    p.paragraph_format.space_after = Pt(sizes["para_space_after"])
+
+    for para_text in cover_letter_text.split("\n\n"):
+        if not para_text.strip():
+            continue
+        p = doc.add_paragraph()
+        run = p.add_run(para_text.strip())
+        _set_font(run, size=Pt(sizes["body"]))
+        p.paragraph_format.space_after = Pt(sizes["para_space_after"])
+
+    p = doc.add_paragraph()
+    run = p.add_run("Sincerely,")
+    _set_font(run, size=Pt(sizes["body"]))
+    p.paragraph_format.space_after = Pt(sizes["para_space_after"] * 1.5)
+
+    p = doc.add_paragraph()
+    run = p.add_run(basics.get("name", ""))
+    _set_font(run, size=Pt(sizes["body"]))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    doc.save(str(output_path))
+
+
 # ---------------------------------------------------------------------------
 # PDF
 # ---------------------------------------------------------------------------
@@ -438,6 +532,59 @@ def render_pdf(tailored_resume: dict, output_path: Path, margin_in: float = 0.4,
     doc.build(story)
 
 
+def render_cover_letter_pdf(
+    basics: dict, company: str, cover_letter_text: str, output_path: Path, margin_in: float = 0.75, scale: float = 1.0
+) -> None:
+    from xml.sax.saxutils import escape
+
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import Paragraph, SimpleDocTemplate
+
+    def sz(base):
+        return base * scale
+
+    regular_font, bold_font = _register_calibri_fonts()
+
+    styles = {
+        "name": ParagraphStyle("cl_name", fontName=bold_font, fontSize=sz(20), leading=sz(24), alignment=TA_CENTER, spaceAfter=2 * scale),
+        "contact": ParagraphStyle("cl_contact", fontName=regular_font, fontSize=sz(9.5), leading=sz(12), alignment=TA_CENTER, spaceAfter=12 * scale),
+        "body": ParagraphStyle("cl_body", fontName=regular_font, fontSize=sz(10.5), leading=sz(15), spaceAfter=10 * scale),
+    }
+
+    story = []
+    story.append(Paragraph(escape(basics.get("name", "")), styles["name"]))
+    contact_parts = [x for x in [basics.get("phone"), basics.get("email")] if x]
+    links = basics.get("links", {}) or {}
+    for key in ("linkedin", "github", "portfolio"):
+        if links.get(key):
+            contact_parts.append(links[key])
+    story.append(Paragraph(escape(" | ".join(contact_parts)), styles["contact"]))
+
+    story.append(Paragraph(escape(_format_full_date(date.today())), styles["body"]))
+    story.append(Paragraph(escape(f"Dear {company} Hiring Team,"), styles["body"]))
+
+    for para_text in cover_letter_text.split("\n\n"):
+        if para_text.strip():
+            story.append(Paragraph(escape(para_text.strip()), styles["body"]))
+
+    story.append(Paragraph("Sincerely,", styles["body"]))
+    story.append(Paragraph(escape(basics.get("name", "")), styles["body"]))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    doc = SimpleDocTemplate(
+        str(output_path),
+        pagesize=letter,
+        leftMargin=margin_in * inch,
+        rightMargin=margin_in * inch,
+        topMargin=max(0.3, margin_in - 0.1) * inch,
+        bottomMargin=max(0.3, margin_in - 0.1) * inch,
+    )
+    doc.build(story)
+
+
 # ---------------------------------------------------------------------------
 # One-page layout search
 # ---------------------------------------------------------------------------
@@ -457,6 +604,31 @@ def find_one_page_layout(tailored_resume: dict) -> dict:
             if len(PdfReader(str(probe_path)).pages) == 1:
                 return {"margin_in": margin_in, "scale": scale, "fits": True}
         margin_in, scale = LAYOUT_CANDIDATES[-1]
+        return {"margin_in": margin_in, "scale": scale, "fits": False}
+
+
+# Letters start more spacious than resumes (0.75in is a standard business-
+# letter margin) since cover letter content is much lighter than a resume's;
+# still searches down to the same 0.4in floor before touching font scale.
+COVER_LETTER_LAYOUT_CANDIDATES = [
+    (0.75, 1.00), (0.6, 1.00), (0.5, 1.00), (0.4, 1.00),
+    (0.4, 0.95), (0.4, 0.90), (0.4, 0.85), (0.4, 0.80),
+]
+
+
+def find_one_page_layout_cover_letter(basics: dict, company: str, cover_letter_text: str) -> dict:
+    """Same technique as find_one_page_layout, adapted for a single flowing
+    letter instead of a resume's discrete sections -- same PDF-page-count-as-
+    ground-truth search, same never-truncate-content guarantee."""
+    from pypdf import PdfReader
+
+    with tempfile.TemporaryDirectory() as tmp:
+        probe_path = Path(tmp) / "probe.pdf"
+        for margin_in, scale in COVER_LETTER_LAYOUT_CANDIDATES:
+            render_cover_letter_pdf(basics, company, cover_letter_text, probe_path, margin_in=margin_in, scale=scale)
+            if len(PdfReader(str(probe_path)).pages) == 1:
+                return {"margin_in": margin_in, "scale": scale, "fits": True}
+        margin_in, scale = COVER_LETTER_LAYOUT_CANDIDATES[-1]
         return {"margin_in": margin_in, "scale": scale, "fits": False}
 
 

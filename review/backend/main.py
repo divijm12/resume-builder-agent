@@ -68,9 +68,13 @@ class CreateJobRequest(BaseModel):
     role: Optional[str] = None
     tailor_model: Optional[str] = None
     mode: Optional[str] = None
+    generate_cover_letter: Optional[bool] = None
 
 
-def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[str], tailor_model: str, mode: str):
+def _run_job(
+    job_id: str, jd_text: str, company: Optional[str], role: Optional[str],
+    tailor_model: str, mode: str, generate_cover_letter_flag: bool,
+):
     def report(stage: str):
         with JOBS_LOCK:
             JOBS[job_id]["stage"] = stage
@@ -82,6 +86,7 @@ def _run_job(job_id: str, jd_text: str, company: Optional[str], role: Optional[s
             role_override=role,
             tailor_model=tailor_model,
             mode=mode,
+            generate_cover_letter_flag=generate_cover_letter_flag,
             outputs_dir=OUTPUTS_DIR,
             db_path=DB_PATH,
             resume_path=RESUME_PATH,
@@ -104,6 +109,7 @@ def create_job(body: CreateJobRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(
         _run_job, job_id, body.jd_text, body.company, body.role,
         body.tailor_model or apply.DEFAULT_MODEL, body.mode or "aggressive",
+        bool(body.generate_cover_letter),
     )
     return {"job_id": job_id}
 
@@ -179,26 +185,30 @@ def update_application(app_id: int, body: UpdateApplicationRequest):
 
 @app.get("/api/applications/{app_id}/file")
 def get_application_file(app_id: int, type: str = "pdf"):
-    if type not in ("pdf", "docx"):
-        raise HTTPException(400, "type must be 'pdf' or 'docx'")
+    valid_types = ("pdf", "docx", "cover_letter_pdf", "cover_letter_docx")
+    if type not in valid_types:
+        raise HTTPException(400, f"type must be one of {valid_types}")
+    is_cover_letter = type.startswith("cover_letter_")
+    column = "cover_letter_path" if is_cover_letter else "resume_variant_path"
+
     conn = _get_db()
     try:
-        row = conn.execute("SELECT resume_variant_path FROM applications WHERE id = ?", (app_id,)).fetchone()
+        row = conn.execute(f"SELECT {column} FROM applications WHERE id = ?", (app_id,)).fetchone()
     finally:
         conn.close()
-    if row is None or not row["resume_variant_path"]:
-        raise HTTPException(404, "application or resume file not found")
+    if row is None or not row[column]:
+        raise HTTPException(404, "application or file not found")
 
-    stored_path = Path(row["resume_variant_path"])
+    stored_path = Path(row[column])
     docx_path = stored_path if stored_path.is_absolute() else REPO_ROOT / stored_path
-    file_path = docx_path if type == "docx" else docx_path.with_suffix(".pdf")
+    wants_pdf = type in ("pdf", "cover_letter_pdf")
+    file_path = docx_path.with_suffix(".pdf") if wants_pdf else docx_path
     if not file_path.exists():
         raise HTTPException(404, "file not found on disk")
 
     media_type = (
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-        if type == "docx"
-        else "application/pdf"
+        "application/pdf" if wants_pdf
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     )
     return FileResponse(str(file_path), media_type=media_type, filename=file_path.name)
 

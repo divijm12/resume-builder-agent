@@ -62,6 +62,7 @@ export interface JdParsed {
 export interface ApplicationDetail extends ApplicationSummary {
   jd_raw: string | null;
   resume_variant_path: string | null;
+  cover_letter_path: string | null;
   notes: string | null;
   jd_parsed: JdParsed | null;
   tailor_result: TailorResult | null;
@@ -110,6 +111,8 @@ export function createJob(params: {
    * fixed fast model server-side. See apply.py's run_pipeline docstring. */
   tailor_model?: string;
   mode?: string;
+  /** Off by default -- adds one more paid API call. */
+  generate_cover_letter?: boolean;
 }): Promise<{ job_id: string }> {
   return request("/api/jobs", { method: "POST", body: JSON.stringify(params) });
 }
@@ -133,6 +136,6 @@ export function updateApplication(
   return request(`/api/applications/${id}`, { method: "PATCH", body: JSON.stringify(updates) });
 }
 
-export function fileUrl(id: number, type: "pdf" | "docx"): string {
+export function fileUrl(id: number, type: "pdf" | "docx" | "cover_letter_pdf" | "cover_letter_docx"): string {
   return `${API_BASE}/api/applications/${id}/file?type=${type}`;
 }

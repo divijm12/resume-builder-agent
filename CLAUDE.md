@@ -17,7 +17,7 @@ agents/
   ingest_jd.py
   score.py
   tailor.py
-  cover_letter.py          # not yet built (Phase 2)
+  cover_letter.py          # Stage 4, opt-in per run -- see ARCHITECTURE.md
   find_contact.py          # not yet built (Phase 4)
   draft_outreach.py        # not yet built (Phase 5)
 render/
@@ -31,7 +31,7 @@ outputs/
   <company>_<role>_<date>/
     <Firstname>_<Lastname>_<Company>_<Role>.docx
     <Firstname>_<Lastname>_<Company>_<Role>.pdf
-    cover_letter.docx      # not yet built (Phase 2)
+    <Firstname>_<Lastname>_<Company>_<Role>_Cover_Letter.docx/.pdf  # only when requested
     outreach_draft.md      # not yet built (Phase 5)
 ```
 
@@ -52,10 +52,11 @@ outputs/
 - When in doubt about a scope decision, default to the more conservative/manual option and ask rather than automating further.
 
 ## Commands
-- `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values, `--mode honest|aggressive` to control tailoring intensity (default `aggressive`; see ARCHITECTURE.md Stage 2 — neither mode fabricates).
+- `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values, `--mode honest|aggressive` to control tailoring intensity (default `aggressive`; see ARCHITECTURE.md Stage 2 — neither mode fabricates), `--tailor-model <model>` to pick the model for tailoring only (ingest/scoring always use their own fast default — see ARCHITECTURE.md Stage 7), `--cover-letter` to also generate a cover letter (off by default — one more paid API call).
 - `python agents/ingest_jd.py --file path/to/jd.txt` — Stage 0 alone
 - `python agents/score.py --jd-json path/to/jd_parsed.json` — Stage 1 alone
 - `python agents/tailor.py --jd-json ... --score-json ... [--mode honest|aggressive]` — Stage 2 alone
+- `python agents/cover_letter.py --jd-json ... --tailored-resume-json ...` — Stage 4 alone (needs a `tailored_resume` dict, not the raw master resume)
 - `python render/render.py --tailored-json ... --company ... --role ...` — Stage 3 alone
 - `cd review/backend && uvicorn main:app --reload --port 8000` — start the review API (needs `.env` at repo root). **`--reload` only watches `review/backend/` by default — it does NOT pick up edits to `agents/*.py`, `apply.py`, or `render/render.py`, since those live outside that directory.** After editing anything outside `review/backend/`, restart the uvicorn process manually (kill it and relaunch) — confirmed the hard way: a long-running server silently served pre-fix `tailor.py` code for an entire debugging session because of this. Don't assume a running dashboard reflects the latest agent/pipeline code without checking when the backend process was last started.
 - `cd review/frontend && npm run dev` — start the review web UI (http://localhost:5173), needs the backend running

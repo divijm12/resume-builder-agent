@@ -118,9 +118,37 @@ Each stage = one Claude Code subagent / skill with a narrow job.
 **Hard one-page rule:** the resume must render to exactly one page, and content is never dropped to force that — every bullet/skill the tailoring stage selected must appear. `find_one_page_layout()` searches a fixed sequence of (margin, font-scale) candidates from most spacious to most compact — margins tighten to a 0.4in floor before font scale is touched at all, since smaller margins don't hurt readability the way smaller text does — using the reportlab PDF render as ground truth (exact page count via `pypdf`) and picking the first candidate that fits. If even the most compact candidate still overflows, that layout is used anyway with a printed warning rather than truncating content. The winning (margin, scale) is applied to both the pdf and the docx render; the docx's one-page fit is therefore a close estimate calibrated off the PDF, not independently verified, since docx has no accessible pagination info without an actual rendering engine (Word's automation is broken; no LibreOffice installed).
 
 ### Stage 4 — Cover Letter
-**In:** `jd_parsed.json` + `tailored_resume.yaml`
-**Out:** `cover_letter.md` → rendered doc
-**Notes:** independent from Stage 2 so either can be regenerated alone.
+Built 2026-08-30 (`agents/cover_letter.py`), opt-in per run (off by default --
+one more paid API call).
+**In:** `jd_parsed.json` + `tailored_resume` (the finished Stage 2 output,
+not `master_resume.yaml` -- the letter's emphasis has to match what the
+resume actually emphasizes for this JD, not the candidate's full untailored
+history).
+**Out:** `{cover_letter_text, validation_log, model}`, then rendered to
+`<...>_Cover_Letter.docx/.pdf` in the same `outputs/` folder as the resume
+(`render_cover_letter_docx`/`_pdf`, `find_one_page_layout_cover_letter` --
+same Calibri/one-page-search infrastructure as the resume, adapted for a
+single flowing letter instead of discrete sections).
+**No-fabrication guardrail, adapted for free-form prose:** a resume bullet
+that gets reworded badly has a known-good original to revert to; a cover
+letter sentence doesn't. So instead, the model's structured output
+(`CoverLetterDraft`, a list of paragraphs of `{text,
+source_bullet_ids}` claims) must cite which real tailored-resume bullet(s)
+ground each substantive claim; code then verifies every number in a claim
+against its cited bullets' actual text (reusing `tailor.py`'s
+`_numeric_tokens()`) and drops any claim that fails -- entirely, not
+reworded, since there's no safe rewrite to fall back to -- logging the drop.
+Verified live: a real run generated a letter whose every specific claim
+(a "recurring data failures... by half" fix, a "40% API latency" reduction,
+"100k+ records") traced back word-for-word to real tailored-resume bullets,
+with a genuine opening hook instead of the "I am writing to express
+interest..." cliché the prompt explicitly bans.
+**Honest limitation:** unlike numbers, named skill/tech fabrication isn't
+hard-blocked -- code can confirm a mentioned term IS real (in the master
+resume's vocabulary) but can't enumerate every term that could be invented
+from nothing. Same class of gap as `tailor.py`'s documented turfgrass/
+genericization limitation; leans on prompting plus the fact that nothing in
+this pipeline sends anything without manual review (CLAUDE.md hard rule 2).
 
 ### Stage 5 — Contact Discovery
 **In:** company name, role
@@ -133,7 +161,7 @@ Each stage = one Claude Code subagent / skill with a narrow job.
 **Notes:** drafts only. Lands in a review queue.
 
 ### Stage 7 — Review Queue (human checkpoint)
-Built 2026-08-28 as a full web app (`review/backend/` + `review/frontend/`), not the originally-planned CLI — the user wanted a real trigger-and-review interface, not a read-only list. **In:** `POST /api/jobs {jd_text, company?, role?, tailor_model?}` on the FastAPI backend, which runs `apply.py`'s pipeline as a `BackgroundTasks` job (never blocks the request — the pipeline takes up to ~1min across 4 sequential Anthropic calls) and reports live per-stage progress via an in-memory job store, polled by the frontend at `GET /api/jobs/{id}`. **Model split (added 2026-08-30):** `tailor_model` only selects the model for the tailoring stage — ingest and both scoring calls always run on a fixed fast model regardless, per `apply.py`'s `run_pipeline` docstring; switching to Sonnet used to mean 4 slow calls, this way it's 1. **Out:** a React app (Vite + TypeScript + Tailwind) with three views — `/new` (paste JD, watch progress, auto-redirects to the result), `/` (applications list), `/applications/:id` (score before/after, hard gaps, red flags, matched skills, diff summary, PDF/docx download links, status dropdown wired to `PATCH /api/applications/{id}`). Sending is still never automated — this stage only reviews/tracks what `apply.py` already generated. See `LEARNING_LOG.md` sections 4, 6, and 7 for the reasoning behind the async job design and a from-first-principles explanation of the web/React concepts involved.
+Built 2026-08-28 as a full web app (`review/backend/` + `review/frontend/`), not the originally-planned CLI — the user wanted a real trigger-and-review interface, not a read-only list. **In:** `POST /api/jobs {jd_text, company?, role?, tailor_model?, mode?, generate_cover_letter?}` on the FastAPI backend, which runs `apply.py`'s pipeline as a `BackgroundTasks` job (never blocks the request — the pipeline takes up to ~1min across 4-5 sequential Anthropic calls) and reports live per-stage progress via an in-memory job store, polled by the frontend at `GET /api/jobs/{id}`. **Model split (added 2026-08-30):** `tailor_model` only selects the model for the tailoring stage (and the cover letter stage, when requested) — ingest and both scoring calls always run on a fixed fast model regardless, per `apply.py`'s `run_pipeline` docstring; switching to Sonnet used to mean 4 slow calls, this way it's 1. **Cover letter (added 2026-08-30):** `generate_cover_letter` defaults to off (one more paid call, so it's opt-in per run); `GET /api/applications/{id}/file` gained `type=cover_letter_pdf|cover_letter_docx` alongside the existing `pdf|docx`, both deriving from the (only-when-generated) `cover_letter_path` column the same way the resume types already derive from `resume_variant_path`. **Out:** a React app (Vite + TypeScript + Tailwind) with three views — `/new` (paste JD, pick tailoring model/mode, optionally request a cover letter, watch progress, auto-redirects to the result), `/` (applications list), `/applications/:id` (score before/after, hard gaps, red flags, matched skills, diff summary, PDF/docx download links for the resume and, when generated, the cover letter, status dropdown wired to `PATCH /api/applications/{id}`). Sending is still never automated — this stage only reviews/tracks what `apply.py` already generated. See `LEARNING_LOG.md` sections 4, 6, and 7 for the reasoning behind the async job design and a from-first-principles explanation of the web/React concepts involved.
 
 ### Orchestrator — `apply.py`
 Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refers to. Agents (`agents/*.py`) stay pure (JSON in, JSON out, no side effects); `apply.py` is what actually chains ingest → score → tailor → render and owns the file/DB persistence those stages don't do themselves. Built 2026-08-28 specifically to close the gap between hard rule 4 ("log the application in `applications.db` immediately after generation") being written down from Phase 0 and actually being implemented — nothing wrote to `applications.db` before this existed. `run_pipeline()` auto-extracts company/role from the parsed JD (`--company`/`--role` override if the JD doesn't state one or extraction is wrong) and calls `log_application()` right after rendering, inserting one `applications` row (status defaults to `'drafted'`) and one `resume_versions` row (`diff_from_master` = the tailoring stage's `diff_summary`, JSON-encoded). `match_score` logged is `score_after` (the tailored resume's score), not `score_before` — the row should reflect what's actually being submitted.

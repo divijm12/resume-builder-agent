@@ -510,4 +510,62 @@ response either parses or it doesn't.
 
 ---
 
+## 12. Cover letters: a guardrail for content with no "original" to fall back to
+
+Every guardrail up to this point leaned on one convenient fact: a resume
+bullet has a known-good original sitting right there in `master_resume.yaml`.
+If a reworded version drops a number or a named technology, the fix is
+mechanical — throw the bad version away, use the real one instead. That
+trick stops working the moment the content isn't a bullet anymore. A cover
+letter is free-form prose, generated from scratch, with no prior "true"
+version anywhere to revert to. So the interesting design question in
+`agents/cover_letter.py` wasn't "how do we catch a bad claim" — it was
+"once we catch one, what do we even replace it with?"
+
+The answer: don't try to fix the sentence, cite it instead. The model's
+structured output isn't just a string of letter text — it's a list of
+`{text, source_bullet_ids}` claims, where `source_bullet_ids` names which
+real resume bullets that specific sentence is grounded in. Code then does
+something it's done since section 2: reuse `_numeric_tokens()` and check
+that any number in the claim actually appears in the bullet(s) it cited.
+If it doesn't — or if the claim cites nothing at all but states a number
+anyway — the whole claim is dropped from the final letter. Not reworded,
+not softened: removed, because there's no safe rewritten version to fall
+back to the way there is for a bullet. This is the same philosophy as
+every prior guardrail (verify in code, don't trust the model's word) aimed
+at a genuinely different failure shape (nothing to substitute in when
+verification fails).
+
+One thing this design deliberately does *not* solve, and says so in its
+own docstring: a model could still invent a plausible-sounding skill or
+technology that was never mentioned anywhere in the real resume. Numbers
+are closed-form — either the digits match a citation or they don't. Skill
+names aren't — code can confirm a mentioned skill *is* real (it's in the
+master resume's vocabulary), but can't prove a negative over the space of
+every technology someone might claim to know. This is the same category of
+gap as the turfgrass case from section 2: some fabrication risks are
+structurally checkable, some aren't, and pretending otherwise would just
+be a worse kind of dishonesty than admitting the limitation plainly.
+What actually keeps this safe in practice is upstream of the code: this
+produces a *draft*, and nothing in this entire pipeline sends anything
+without a human reading it first (hard rule 2, unchanged since Phase 0).
+
+A second thing worth naming: the prompt explicitly asked for something
+code can't verify at all — a letter that sounds like a person wrote it,
+opens with a real hook instead of "I am writing to express interest in
+the [Role] position," and would actually make a recruiter want to keep
+reading. That's a taste requirement, not a fact-checking one, and it
+turned out to matter just as much as the guardrail — a citation-verified
+letter that reads like a form would have technically passed every check
+and still been worse than useless. Tested against a real J&J JD: the
+generated opener was "When I trace through a system failure, I don't stop
+at the surface symptom — I instrument, measure, and validate my way to
+root cause," and every specific claim in the letter traced back, word for
+word, to a real bullet in that run's tailored resume. Both things were
+true at once — grounded and human — because the citation requirement was
+designed as bookkeeping alongside the sentence, never as a constraint on
+how the sentence itself could be written.
+
+---
+
 *(more entries added as this project continues)*

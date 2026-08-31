@@ -130,6 +130,26 @@ export default function ApplicationDetail() {
         >
           <DownloadIcon /> Open Word doc
         </a>
+        {app.cover_letter_path && (
+          <>
+            <a
+              href={fileUrl(app.id, "cover_letter_pdf")}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
+            >
+              <DownloadIcon /> Open Cover Letter (PDF)
+            </a>
+            <a
+              href={fileUrl(app.id, "cover_letter_docx")}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
+            >
+              <DownloadIcon /> Open Cover Letter (Word)
+            </a>
+          </>
+        )}
       </div>
 
       {tr && (
