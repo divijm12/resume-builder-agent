@@ -95,8 +95,9 @@ Each stage = one Claude Code subagent / skill with a narrow job.
 
 ### Stage 0 — JD Ingest
 **In:** raw JD text (pasted) -- URL fetching and per-hash caching were part of the original plan below but never built; only raw pasted text is supported today
-**Out:** `jd_parsed.json` — `{role, company, seniority, must_have_skills[], nice_to_have[], responsibilities[], keywords[]}`
+**Out:** `jd_parsed.json` — `{role, company, seniority, must_have_skills[], nice_to_have[], responsibilities[], keywords[], hiring_manager_name, hiring_manager_title, team_name}`
 **Notes (original plan, not implemented):** if given a URL, fetch and strip boilerplate before parsing; cache parsed JDs by hash to avoid re-parsing.
+**Named hiring manager / team (added 2026-08-31):** free by-product of the same parse call, no extra API cost -- if the JD text explicitly names a real person to report to (not just a title) or a specific named team (not a generic "our engineering team" phrase), that's extracted; both are `null` for the (large majority of) JDs that don't. Same no-fabrication discipline as the rest of this stage: the prompt requires an explicit textual mention, never a guess from context. Verified against two real JDs: a synthetic one naming "Maria Chen, Director of Engineering" and the "Data Platform team" extracted both correctly; the real Snowflake JD (no manager named anywhere) correctly returned `hiring_manager_name: null` while still correctly picking up its own explicitly-named "Data Platform team" from its "About the team" section -- confirms the extraction is accurate, not just conservative. Surfaced on the Application Detail page as a small "Named directly in the JD" callout above the Find Contact flow -- purely informational for now (Stage 5's Hunter lookup still can't search for one specific named person; see Stage 5's limitation note).
 
 ### Stage 1 — Scoring
 **In:** `jd_parsed.json` + `master_resume.yaml`

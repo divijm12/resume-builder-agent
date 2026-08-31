@@ -653,4 +653,39 @@ lower in the list.
 
 ---
 
+## 15. The cheapest feature is the one that reuses a call you're already making
+
+After the relevance-boost work, the natural next question was: can we find
+the actual hiring manager, not just a best-guess department match? The
+honest answer is no data provider has that as a queryable field — Hunter,
+Apollo, ZoomInfo, none of them know which specific person owns a specific
+open req at a specific company. That mapping lives inside the company's
+own ATS and isn't public.
+
+But there's a cheap, free-standing exception: sometimes the JD *itself*
+names the hiring manager or team directly in its own text ("you'll report
+to Jane Doe, our VP of Engineering", "join our Data Platform team"). That
+information doesn't need a new API call to extract — `ingest_jd.py`
+already sends the full JD text to Claude once, for the existing structured
+parse. Three more optional fields (`hiring_manager_name`,
+`hiring_manager_title`, `team_name`) just ride along in that same request
+and same response schema. No new pipeline stage, no new cost, no new
+guardrail category — the same "only extract what's explicitly stated,
+leave it null otherwise" discipline already governing every other field
+on `JDParsed` covers these too.
+
+Worth remembering as a pattern: before reaching for a new tool or a new
+API call to answer a question, check whether an existing call already has
+access to the raw material and just isn't being asked the extra question
+yet. Verified against a synthetic JD that named both a manager and a team
+(both extracted correctly) and the real Snowflake JD, which turned out to
+be a good test by accident — it doesn't name a manager (correctly `null`)
+but *does* name a specific team ("the Data Platform team," right there in
+its own "About the team" section), which came back extracted correctly
+too. That's a stronger check than a clean null would have been: it shows
+the model is actually reading for a real, specific mention, not just
+defaulting to empty.
+
+---
+
 *(more entries added as this project continues)*

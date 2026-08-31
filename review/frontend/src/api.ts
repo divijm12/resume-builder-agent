@@ -57,6 +57,13 @@ export interface JdParsed {
   nice_to_have: string[];
   responsibilities: string[];
   keywords: string[];
+  /** Only set when the JD text itself names a real person, e.g. "you'll
+   * report to Jane Doe" -- null for the large majority of JDs that don't. */
+  hiring_manager_name: string | null;
+  hiring_manager_title: string | null;
+  /** Only set when the JD names a specific team (e.g. "Data Platform team"),
+   * not a generic phrase like "our engineering team". */
+  team_name: string | null;
 }
 
 export interface ApplicationDetail extends ApplicationSummary {
@@ -72,9 +79,10 @@ export interface ApplicationDetail extends ApplicationSummary {
   contact_verified: number | null;
 }
 
-/** A candidate hiring contact from Hunter.io -- generic to the company, not
- * matched to a specific job opening (Hunter has no notion of "this role").
- * `title` is shown so a human can judge relevance themselves. */
+/** A candidate hiring contact from Hunter.io -- generic to the company
+ * (Hunter has no notion of "this specific role"). `relevance_label` boosts
+ * a best-guess based on department/seniority, but `title` is still shown so
+ * a human can judge relevance themselves on top of that. */
 export interface ContactCandidate {
   name: string | null;
   title: string | null;

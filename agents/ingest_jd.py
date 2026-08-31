@@ -26,7 +26,16 @@ SYSTEM_PROMPT = (
     "-- e.g. 'New College Grad' or 'New Grad' means entry-level, 'Senior' means senior, "
     "'Staff'/'Principal' means staff/principal, 'Intern' means internship, "
     "'Manager'/'Director' means management. Only leave seniority empty if the text truly "
-    "gives no such signal."
+    "gives no such signal.\n\n"
+    "Also check whether the JD text explicitly names a hiring manager, team lead, or a "
+    "specific named team this role belongs to (e.g. 'You'll report to Jane Doe, our VP "
+    "of Engineering' or 'join our Data Platform team'). Extract hiring_manager_name / "
+    "hiring_manager_title only when a real person's name is actually stated -- a title "
+    "alone ('you'll report to the Engineering Manager') is not a name. Extract team_name "
+    "only when a specific, named team is stated ('the Data Platform team', 'our Fraud "
+    "Detection org') -- a generic phrase like 'our engineering team' or 'cross-functional "
+    "stakeholders' does not count as a named team. Leave any of these null rather than "
+    "guess; most JDs will not name either one, and that is the normal, expected case."
 )
 
 
@@ -38,6 +47,9 @@ class JDParsed(BaseModel):
     nice_to_have: List[str]
     responsibilities: List[str]
     keywords: List[str]
+    hiring_manager_name: Optional[str] = None
+    hiring_manager_title: Optional[str] = None
+    team_name: Optional[str] = None
 
 
 def ingest_jd(jd_text: str, model: str = DEFAULT_MODEL) -> dict:

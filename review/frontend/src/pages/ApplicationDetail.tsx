@@ -306,6 +306,27 @@ export default function ApplicationDetail() {
       {preview && <PdfPreviewModal url={preview.url} title={preview.title} onClose={() => setPreview(null)} />}
 
       <Section title="Hiring contact">
+        {(app.jd_parsed?.hiring_manager_name || app.jd_parsed?.team_name) && (
+          <div className="mb-4 rounded-lg border border-[#1c2431] bg-[#10141d] px-4 py-3 text-xs text-[#9db3c9]">
+            <span className="text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">
+              Named directly in the JD
+            </span>
+            <div className="mt-1 space-y-0.5">
+              {app.jd_parsed.hiring_manager_name && (
+                <div>
+                  Reports to{" "}
+                  <span className="font-medium text-[#e4e8f0]">{app.jd_parsed.hiring_manager_name}</span>
+                  {app.jd_parsed.hiring_manager_title ? ` (${app.jd_parsed.hiring_manager_title})` : ""}
+                </div>
+              )}
+              {app.jd_parsed.team_name && (
+                <div>
+                  Team: <span className="font-medium text-[#e4e8f0]">{app.jd_parsed.team_name}</span>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
         {showCandidates ? (
           <div className="space-y-3">
             <p className="text-[11px] text-[#4a5468]">
