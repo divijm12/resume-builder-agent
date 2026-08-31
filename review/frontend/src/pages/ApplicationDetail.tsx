@@ -135,6 +135,14 @@ export default function ApplicationDetail() {
   const [contactSearching, setContactSearching] = useState(false);
   // Kept in state even after a contact is saved -- "See other options" reuses
   // this without another Hunter.io call; only "Search again" fetches fresh.
+  // This is in-memory only (lost on reload/navigation, not written to the DB),
+  // so it's really about avoiding a pointless round-trip and instant re-display,
+  // not primarily about credits -- Hunter's own account already dedupes an
+  // identical Domain Search for the same company within a billing period, so a
+  // real repeat search often wouldn't have cost anything extra anyway. See
+  // https://help.hunter.io/en/articles/1911656 (confirmed after the user
+  // noticed their own Hunter dashboard showed fewer credits used than the
+  // number of raw requests this code was making before this comment existed).
   const [contactCandidates, setContactCandidates] = useState<ContactCandidate[] | null>(null);
   const [contactMessage, setContactMessage] = useState<string | null>(null);
   const [showCandidates, setShowCandidates] = useState(false);
