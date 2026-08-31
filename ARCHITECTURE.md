@@ -255,6 +255,23 @@ logged flag, not a hard truncate**: `generate_outreach_draft` appends a
 cuts text, since truncating risks breaking a citation-verified claim or
 dropping the sign-off mid-sentence -- worse than a slightly-long draft a
 human will read and hand-edit anyway.
+**Formatting (added 2026-08-31):** the first real drafts read as one
+continuous block -- greeting, body, and sign-off all space-joined into a
+single paragraph with no line breaks, because nothing told the model to
+separate them. Fixed two ways: (1) the prompt now requires the greeting
+to be its own paragraph (so `validate_and_build`'s existing `"\n\n"`
+paragraph join puts it on its own line), and (2) **the sign-off is no
+longer written by the model at all** -- `generate_outreach_draft` builds
+"Warm regards,\n{name}\n{email}" deterministically from the tailored
+resume's own `basics` field after validation, guaranteeing the exact
+format every time with zero fabrication risk (only appended when real
+content survived validation, so an all-claims-dropped empty body doesn't
+get a sign-off tacked onto otherwise-empty text -- that would defeat the
+endpoint's empty-draft 422 guard). A soft, logged check flags the case
+where the greeting still ends up merged with the body (no paragraph
+break found) -- same "soft flag, don't guess a fix" philosophy as the
+length check, since forcing a line break at the wrong spot could look
+worse than leaving it for a human's quick pass.
 **Out:** `{subject, body_text, validation_log, model}`.
 **Backend (`POST /api/applications/{id}/draft-outreach`):** synchronous
 inline call (one `messages.parse`, same pattern as `find_application_contact`

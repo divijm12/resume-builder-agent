@@ -58,6 +58,12 @@ SYSTEM_PROMPT = (
     "already there. This is a cold or warm outreach note, not a cover letter: short, "
     "plain sentences, not a full letter. It accompanies (doesn't replace) the tailored "
     "resume, and a cover letter too if one exists.\n\n"
+    "Structure your output as paragraphs (in the paragraphs field) like this: the "
+    "FIRST paragraph must contain ONLY the greeting -- nothing else, e.g. 'Hi Jane,' "
+    "or 'Hi there,'. The remaining paragraph(s) hold everything else. Do NOT write a "
+    "sign-off or closing (no 'Best,', no name, no email) -- that is added "
+    "automatically afterward; your last paragraph should end with the call to action, "
+    "not a farewell.\n\n"
     "Greet the recipient by name if one is given; otherwise use a neutral 'Hi there,' "
     "-- never invent a name. State plainly and briefly that the candidate is applying "
     "for this role. Include exactly ONE genuine, specific hook connecting the "
@@ -72,7 +78,7 @@ SYSTEM_PROMPT = (
     "tailored resume is attached, and a cover letter too if told one exists -- this "
     "can be a short standalone sentence, it doesn't need to absorb the hook sentence "
     "too. Close with a light, low-pressure call to action (e.g. open to a quick chat, "
-    "happy to answer questions) and a sign-off using the candidate's real name.\n\n"
+    "happy to answer questions).\n\n"
     "Keep every sentence short enough to say in one breath. This is an email someone "
     "dashes off, not a polished paragraph. The entire body must fit under 500 "
     "characters total (roughly 80-90 words) -- this is a strict budget, not a "
@@ -88,9 +94,9 @@ SYSTEM_PROMPT = (
     "person wrote it quickly and meant it, not like a template.\n\n"
     "Every claim that states a specific fact, number, or named skill must cite the "
     "tailored resume bullet id(s) it's drawn from in source_bullet_ids. The greeting, "
-    "the 'I'm applying for X' sentence, the attachment mention, and the sign-off "
-    "assert no specific fact and can have an empty source_bullet_ids list. A claim "
-    "you can't honestly cite to a real bullet shouldn't be written at all."
+    "the 'I'm applying for X' sentence, and the attachment mention assert no specific "
+    "fact and can have an empty source_bullet_ids list. A claim you can't honestly "
+    "cite to a real bullet shouldn't be written at all."
 )
 
 
@@ -143,9 +149,33 @@ def generate_outreach_draft(
     if len(body_text) > BODY_LENGTH_BUDGET:
         validation_log.append(
             f"Body is {len(body_text)} characters, over the {BODY_LENGTH_BUDGET}-character "
-            f"target -- not truncated (would risk cutting a verified claim or the sign-off "
-            f"mid-sentence), but worth a manual trim before sending."
+            f"target -- not truncated (would risk cutting a verified claim mid-sentence), "
+            f"but worth a manual trim before sending."
         )
+    if "\n\n" not in body_text:
+        # Expected shape is "Hi Name,\n\n<body>" -- the prompt asks for the
+        # greeting as its own paragraph, but a model can still merge it with
+        # the rest. Soft flag only, same reasoning as the length check above:
+        # nothing here is factually wrong, just worth a manual formatting pass.
+        validation_log.append(
+            "Greeting and body may not be on separate lines (no paragraph break found) "
+            "-- worth a manual formatting pass before sending."
+        )
+
+    # Sign-off is built here, never by the model -- guarantees the exact
+    # "Warm regards, / Name / Email" line-per-field format every time,
+    # using the candidate's real name/email straight from the tailored
+    # resume (zero fabrication risk, zero chance of a malformed sign-off).
+    # Only appended when real content survived validation -- if every claim
+    # got dropped, body_text must stay "" so the caller's empty-draft check
+    # (main.py's 422 guard) still catches it instead of shipping a bodyless
+    # "Warm regards, Name, email" as if it were a finished draft.
+    if body_text.strip():
+        basics = tailored_resume.get("basics", {})
+        signoff_lines = ["Warm regards,", basics.get("name", "")]
+        if basics.get("email"):
+            signoff_lines.append(basics["email"])
+        body_text = body_text + "\n\n" + "\n".join(signoff_lines)
 
     return {
         "subject": subject,

@@ -769,6 +769,33 @@ fabrication or em dashes at any point, confirming the fabrication
 guardrail and the length tuning are genuinely independent concerns that
 didn't trade off against each other.
 
+**Same-day follow-up:** the length fix didn't fix formatting -- a real
+draft could be a correct 450 characters and still read as one unbroken
+block, greeting and sign-off run together with the body, because nothing
+in the schema or prompt told the model to put them on separate lines.
+The fix split into two different kinds of guarantee, on purpose. The
+greeting-on-its-own-paragraph rule stays prompt-governed (soft-checked,
+logged if violated) because there's no cheap way to force a paragraph
+break in the *right* place without risking a worse split than the model
+already tried. The sign-off is different: "Warm regards, then the
+candidate's real name, then their real email, each on its own line" has
+no ambiguity and no judgment call in it at all -- it's the same
+name/email on every single draft, sourced straight from
+`tailored_resume["basics"]`. So it stopped being something the model
+writes and became something code constructs after validation, the same
+move this project made for tenure/graduation dates in `score.py` months
+earlier (section 11): when a piece of output is fully mechanical, stop
+asking a language model to reproduce it faithfully every time and just
+compute it. One trap caught before shipping: the sign-off construction
+originally ran unconditionally, which meant an all-claims-dropped empty
+body would still get "Warm regards, Name, email" appended to it --
+turning a correctly-empty draft (the 422 guard's whole reason to exist)
+into one that looked finished but said nothing. Caught by re-running the
+existing mocked test suite after the change, not by a new test written
+to look for it specifically -- a reminder that rerunning old tests after
+a change earns its keep even when the change looks unrelated to what
+they cover.
+
 ---
 
 *(more entries added as this project continues)*
