@@ -77,6 +77,7 @@ export interface ApplicationDetail extends ApplicationSummary {
   contact_email: string | null;
   contact_source: string | null;
   contact_verified: number | null;
+  outreach_draft_path: string | null;
 }
 
 /** A candidate hiring contact from Hunter.io -- generic to the company
@@ -108,6 +109,18 @@ export interface FindContactResult {
   contacts: ContactCandidate[];
   message: string | null;
   error: string | null;
+}
+
+/** A short, hand-editable outreach email draft (Stage 6) -- never sent by
+ * this app, just generated and shown for the human to copy/edit/send
+ * themselves. `validation_log` carries guardrail activity, same spirit as
+ * TailorResult's -- non-empty only when something was dropped or the body
+ * ran long. */
+export interface OutreachDraftResult {
+  subject: string;
+  body_text: string;
+  validation_log: string[];
+  draft_path: string;
 }
 
 export const APPLICATION_STATUSES = [
@@ -187,6 +200,10 @@ export function updateApplication(
 
 export function findContact(id: number): Promise<FindContactResult> {
   return request(`/api/applications/${id}/find-contact`, { method: "POST" });
+}
+
+export function draftOutreach(id: number): Promise<OutreachDraftResult> {
+  return request(`/api/applications/${id}/draft-outreach`, { method: "POST" });
 }
 
 export function fileUrl(id: number, type: "pdf" | "docx" | "cover_letter_pdf" | "cover_letter_docx"): string {

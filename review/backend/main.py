@@ -31,6 +31,7 @@ load_dotenv(REPO_ROOT / ".env")
 
 import apply  # noqa: E402  (must follow sys.path insert)
 import find_contact  # noqa: E402  (agents/ is on sys.path via apply's own import above)
+import draft_outreach  # noqa: E402  (agents/ is on sys.path via apply's own import above)
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -188,6 +189,75 @@ def find_application_contact(app_id: int):
     return find_contact.find_contacts(
         row["company"], role_title=row["role_title"], hiring_manager_name=hiring_manager_name
     )
+
+
+@app.post("/api/applications/{app_id}/draft-outreach")
+def draft_application_outreach(app_id: int):
+    """Generate a short, hand-editable outreach email draft (Stage 6).
+    Draft-only, per CLAUDE.md hard rule 2 -- writes a scratch .md file next
+    to the resume/cover letter and records its path, but never sends
+    anything and never requires a saved contact first (see
+    agents/draft_outreach.py's module docstring for the greeting fallback
+    that degrades gracefully when no contact is saved yet)."""
+    conn = _get_db()
+    try:
+        row = conn.execute(
+            """SELECT company, role_title, jd_parsed_json, tailor_result_json,
+                      resume_variant_path, cover_letter_path, contact_name
+               FROM applications WHERE id = ?""",
+            (app_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(404, "application not found")
+    if not row["resume_variant_path"]:
+        raise HTTPException(404, "no resume generated for this application yet")
+
+    jd_parsed = json.loads(row["jd_parsed_json"]) if row["jd_parsed_json"] else {}
+    tailored_resume = json.loads(row["tailor_result_json"])["tailored_resume"]
+    # Same human-verified-first fallback as the greeting logic in
+    # draft_outreach.py's own docstring: a saved contact (from Find Contact)
+    # outranks a JD-stated name, which outranks no name at all.
+    contact_name = row["contact_name"] or jd_parsed.get("hiring_manager_name")
+
+    result = draft_outreach.generate_outreach_draft(
+        jd_parsed,
+        tailored_resume,
+        row["company"],
+        contact_name=contact_name,
+        has_cover_letter=bool(row["cover_letter_path"]),
+    )
+    if not result["body_text"].strip():
+        raise HTTPException(
+            422, "Every claim in the generated draft failed verification -- nothing safe to show. Try again."
+        )
+
+    stored_path = Path(row["resume_variant_path"])
+    resume_path = stored_path if stored_path.is_absolute() else REPO_ROOT / stored_path
+    output_dir = resume_path.parent
+    draft_path = output_dir / "outreach_draft.md"
+    # Overwritten in place on every regeneration -- unlike resume_variant_path/
+    # cover_letter_path (the submitted artifacts, never overwritten per hard
+    # rule 4), this is explicitly a scratch draft meant for hand-editing
+    # before sending, so there's no "previous version" worth preserving here.
+    draft_path.write_text(f"Subject: {result['subject']}\n\n{result['body_text']}\n")
+
+    conn = _get_db()
+    try:
+        conn.execute(
+            "UPDATE applications SET outreach_draft_path = ? WHERE id = ?", (str(draft_path), app_id)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return {
+        "subject": result["subject"],
+        "body_text": result["body_text"],
+        "validation_log": result["validation_log"],
+        "draft_path": str(draft_path),
+    }
 
 
 class UpdateApplicationRequest(BaseModel):

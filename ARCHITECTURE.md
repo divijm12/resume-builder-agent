@@ -77,6 +77,8 @@ applications(
                         -- neither mode fabricates
   status,               -- drafted | applied | outreach_sent | interview | rejected | ghosted | offer
   contact_name, contact_email, contact_source, contact_verified,
+  outreach_draft_path,  -- Stage 6, overwritten in place on regeneration (unlike
+                        -- resume_variant_path/cover_letter_path, never overwritten)
   outreach_sent_at, response_received, notes
 )
 
@@ -220,12 +222,63 @@ silently wrong. When Hunter finds nothing, `message` says so plainly
 instead of guessing from a scrape.
 
 ### Stage 6 — Outreach Draft
-**In:** contact + jd_parsed + tailored_resume summary
-**Out:** `outreach_draft.md`
-**Notes:** drafts only. Lands in a review queue.
+Built 2026-08-31 (`agents/draft_outreach.py`), on-demand from the
+Application Detail page ("Draft outreach email" button), same trigger
+pattern as Stage 5 -- not bundled into the main pipeline run. **Draft
+only, per CLAUDE.md hard rule 2**: no send capability of any kind exists
+in this stage or anywhere it's wired to -- no Gmail API, no OAuth, no
+send button. It writes a re-editable file for a human to copy, edit, and
+send themselves.
+**In:** `jd_parsed`, `tailored_resume`, `company`, and `contact_name`
+(optional). **Reuses `cover_letter.py`'s guardrail machinery by direct
+import** rather than forking a copy (`CoverLetterClaim`,
+`validate_and_build`, `_strip_em_dashes`) -- same citation-based
+numeric-fabrication check and em-dash stripping a cover letter gets;
+`validate_and_build`'s `cover_letter_text` key is renamed to `body_text`
+locally rather than reimplemented, with a comment flagging the coupling
+so a genuine future divergence (e.g. a length cap outreach needs that a
+cover letter doesn't) becomes a deliberate fork, not a surprise.
+**Greeting fallback, three tiers:** a human-verified `contact_name`
+(saved via Find Contact) if present, else `jd_parsed`'s own
+`hiring_manager_name` (JD-stated, Stage 0) if present, else a neutral
+"Hi there," -- both sources already exist on every application row at
+zero extra cost.
+**Length budget (user-specified):** the prompt targets under 500
+characters (a real outreach note, not a mini cover letter) and
+explicitly bans chaining multiple accomplishments into one dense
+sentence -- the first draft against real data ran ~700 characters with
+three accomplishments crammed into one clause; tightened prompt language
+(cap one comma in the hook sentence, "pick one accomplishment and stop")
+got real output down to ~450-575 characters. Enforced as a **soft,
+logged flag, not a hard truncate**: `generate_outreach_draft` appends a
+`validation_log` entry if `body_text` exceeds 500 characters, but never
+cuts text, since truncating risks breaking a citation-verified claim or
+dropping the sign-off mid-sentence -- worse than a slightly-long draft a
+human will read and hand-edit anyway.
+**Out:** `{subject, body_text, validation_log, model}`.
+**Backend (`POST /api/applications/{id}/draft-outreach`):** synchronous
+inline call (one `messages.parse`, same pattern as `find_application_contact`
+-- doesn't need the `BackgroundTasks`/`JOBS` polling `run_pipeline` gets).
+Resolves the JD-named/saved contact fallback, calls Stage 6, and on
+success writes `outreach_draft.md` into the application's existing
+output folder (resolved via the same absolute/relative `resume_variant_path`
+fallback `get_application_file` already uses) and records its path in a
+new `outreach_draft_path` column. **Overwritten in place on every
+regeneration** -- unlike `resume_variant_path`/`cover_letter_path` (the
+submitted artifacts, protected by hard rule 4's "never overwrite a
+previous version"), this is explicitly a scratch draft meant for
+hand-editing before sending, so there's no "previous version" worth
+preserving. If every claim fails validation and `body_text` comes back
+empty, the endpoint returns 422 without writing any file or touching the
+DB column, rather than presenting a blank draft as a finished one.
+**No gating on a saved contact** -- consistent with how every other
+optional stage in this pipeline works (cover letter is an independent
+opt-in per run; Find Contact runs regardless of cover-letter/contact
+state), the "Draft outreach email" button is always available and just
+personalizes the greeting if a name happens to be present.
 
 ### Stage 7 — Review Queue (human checkpoint)
-Built 2026-08-28 as a full web app (`review/backend/` + `review/frontend/`), not the originally-planned CLI — the user wanted a real trigger-and-review interface, not a read-only list. **In:** `POST /api/jobs {jd_text, company?, role?, tailor_model?, mode?, generate_cover_letter?}` on the FastAPI backend, which runs `apply.py`'s pipeline as a `BackgroundTasks` job (never blocks the request — the pipeline takes up to ~1min across 4-5 sequential Anthropic calls) and reports live per-stage progress via an in-memory job store, polled by the frontend at `GET /api/jobs/{id}`. **Model split (added 2026-08-30):** `tailor_model` only selects the model for the tailoring stage (and the cover letter stage, when requested) — ingest and both scoring calls always run on a fixed fast model regardless, per `apply.py`'s `run_pipeline` docstring; switching to Sonnet used to mean 4 slow calls, this way it's 1. **Cover letter (added 2026-08-30):** `generate_cover_letter` defaults to off (one more paid call, so it's opt-in per run); `GET /api/applications/{id}/file` gained `type=cover_letter_pdf|cover_letter_docx` alongside the existing `pdf|docx`, both deriving from the (only-when-generated) `cover_letter_path` column the same way the resume types already derive from `resume_variant_path`. **Contact discovery (added 2026-08-30, relevance boost + named-in-JD lookup added 2026-08-31):** `POST /api/applications/{id}/find-contact` looks up that application's `company`, `role_title`, and (parsed from the stored `jd_parsed_json`) `hiring_manager_name` and calls Stage 5, returning the ranked candidate list (recruiters/team-relevant/JD-named contacts boosted to the top and labeled) without writing anything — `PATCH /api/applications/{id}` (the same endpoint the status dropdown already used) gained optional `contact_name`/`contact_email`/`contact_source`/`contact_verified` fields so the frontend can save whichever candidate a human picks. **Out:** a React app (Vite + TypeScript + Tailwind) with three views — `/new` (paste JD, pick tailoring model/mode, optionally request a cover letter, watch progress, auto-redirects to the result), `/` (applications list), `/applications/:id` (score before/after, hard gaps, red flags, matched skills, diff summary, PDF/docx download links for the resume and, when generated, the cover letter, a "Find hiring contact" flow, status dropdown wired to `PATCH /api/applications/{id}`). Sending is still never automated — this stage only reviews/tracks what `apply.py` already generated. See `LEARNING_LOG.md` sections 4, 6, and 7 for the reasoning behind the async job design and a from-first-principles explanation of the web/React concepts involved.
+Built 2026-08-28 as a full web app (`review/backend/` + `review/frontend/`), not the originally-planned CLI — the user wanted a real trigger-and-review interface, not a read-only list. **In:** `POST /api/jobs {jd_text, company?, role?, tailor_model?, mode?, generate_cover_letter?}` on the FastAPI backend, which runs `apply.py`'s pipeline as a `BackgroundTasks` job (never blocks the request — the pipeline takes up to ~1min across 4-5 sequential Anthropic calls) and reports live per-stage progress via an in-memory job store, polled by the frontend at `GET /api/jobs/{id}`. **Model split (added 2026-08-30):** `tailor_model` only selects the model for the tailoring stage (and the cover letter stage, when requested) — ingest and both scoring calls always run on a fixed fast model regardless, per `apply.py`'s `run_pipeline` docstring; switching to Sonnet used to mean 4 slow calls, this way it's 1. **Cover letter (added 2026-08-30):** `generate_cover_letter` defaults to off (one more paid call, so it's opt-in per run); `GET /api/applications/{id}/file` gained `type=cover_letter_pdf|cover_letter_docx` alongside the existing `pdf|docx`, both deriving from the (only-when-generated) `cover_letter_path` column the same way the resume types already derive from `resume_variant_path`. **Contact discovery (added 2026-08-30, relevance boost + named-in-JD lookup added 2026-08-31):** `POST /api/applications/{id}/find-contact` looks up that application's `company`, `role_title`, and (parsed from the stored `jd_parsed_json`) `hiring_manager_name` and calls Stage 5, returning the ranked candidate list (recruiters/team-relevant/JD-named contacts boosted to the top and labeled) without writing anything — `PATCH /api/applications/{id}` (the same endpoint the status dropdown already used) gained optional `contact_name`/`contact_email`/`contact_source`/`contact_verified` fields so the frontend can save whichever candidate a human picks. **Outreach draft (added 2026-08-31):** `POST /api/applications/{id}/draft-outreach` calls Stage 6 and writes/tracks `outreach_draft.md` -- see Stage 6 for the full design. **Out:** a React app (Vite + TypeScript + Tailwind) with three views — `/new` (paste JD, pick tailoring model/mode, optionally request a cover letter, watch progress, auto-redirects to the result), `/` (applications list), `/applications/:id` (score before/after, hard gaps, red flags, matched skills, diff summary, PDF/docx download links for the resume and, when generated, the cover letter, a "Find hiring contact" flow, an "Outreach draft" section with copy-to-clipboard, status dropdown wired to `PATCH /api/applications/{id}`). Sending is still never automated — this stage only reviews/tracks what `apply.py` already generated. See `LEARNING_LOG.md` sections 4, 6, and 7 for the reasoning behind the async job design and a from-first-principles explanation of the web/React concepts involved.
 
 ### Orchestrator — `apply.py`
 Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refers to. Agents (`agents/*.py`) stay pure (JSON in, JSON out, no side effects); `apply.py` is what actually chains ingest → score → tailor → render and owns the file/DB persistence those stages don't do themselves. Built 2026-08-28 specifically to close the gap between hard rule 4 ("log the application in `applications.db` immediately after generation") being written down from Phase 0 and actually being implemented — nothing wrote to `applications.db` before this existed. `run_pipeline()` auto-extracts company/role from the parsed JD (`--company`/`--role` override if the JD doesn't state one or extraction is wrong) and calls `log_application()` right after rendering, inserting one `applications` row (status defaults to `'drafted'`) and one `resume_versions` row (`diff_from_master` = the tailoring stage's `diff_summary`, JSON-encoded). `match_score` logged is `score_after` (the tailored resume's score), not `score_before` — the row should reflect what's actually being submitted.

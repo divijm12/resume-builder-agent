@@ -715,4 +715,60 @@ each time.
 
 ---
 
+## 16. Reuse the guardrail, not just the shape; and a prompt "target" isn't a guarantee
+
+Phase 5's outreach draft agent (`agents/draft_outreach.py`) is the third
+agent in this project shaped like "model proposes claims with citations,
+code verifies every number against the citation, drops what fails." The
+first two times (tailoring, then the cover letter), that guardrail got
+written fresh each time, adapted to the new context. This time it didn't
+need to be rewritten at all -- `draft_outreach.py` just imports
+`CoverLetterClaim` and `validate_and_build` directly from
+`cover_letter.py` and calls them as-is, renaming one output key locally.
+Same principle as section 15 (reuse what already exists before building
+something new), one level more specific: when the *shape* of a problem
+repeats, check whether the *code* that already solved it can be called
+directly, not just copied and adapted. A future divergence (say, outreach
+needing a length cap a cover letter doesn't) is still an easy, deliberate
+fork later -- it just isn't the default.
+
+The more interesting lesson came from the very first real output. The
+prompt asked for "3-6 sentences," and the model wrote something
+grammatically fine, fully fact-checked, zero fabrication -- and about 700
+characters, reading like a compressed cover letter, because it chained
+three separate accomplishments into one long sentence with "and this,
+and that, and also this." The user's own reaction, watching the real
+output: "keep it less than 500 chars." That's a much more concrete
+target than "short," and it exposed exactly what "short" had failed to
+constrain: sentence count says nothing about how much gets crammed into
+each sentence.
+
+Two things followed from that, and they're different in kind. The prompt
+got more specific and mechanical ("at most one comma in the hook
+sentence," "pick one accomplishment and stop," an explicit character
+budget) -- that's the same "vague instructions don't hold, specific ones
+do better" lesson this project has hit before. But the length target
+itself only got a *soft*, logged enforcement in code, not a hard
+truncate, and that was a deliberate choice, not a shortcut: this project
+has a hard rule for fabrication (revert/drop, no exceptions) because a
+fabricated fact is unambiguously wrong. A draft running 550 characters
+instead of 500 is not wrong, it's just longer than ideal -- and a
+truncate can't tell the difference between "trailing filler" and "the
+middle of a fact-checked sentence" or "the sign-off." Cutting blind text
+to hit a number would trade a real problem (occasionally long) for a
+worse one (occasionally broken). So `generate_outreach_draft` appends a
+validation_log note when the body runs over budget and leaves the text
+alone -- the same "guardrails enforce correctness in code, style stays
+prompt-governed with honest limits" split this project has kept
+consistently, just applied to a length target instead of a factual one.
+Verified against real data (id 9, Snowflake, read-only) across three
+prompt iterations: 700+ characters with three chained accomplishments,
+down to 575 with one accomplishment but still a bit dense, down to 454
+with the tightened "one comma, one thing" instruction -- and zero
+fabrication or em dashes at any point, confirming the fabrication
+guardrail and the length tuning are genuinely independent concerns that
+didn't trade off against each other.
+
+---
+
 *(more entries added as this project continues)*

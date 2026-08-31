@@ -2,12 +2,14 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   APPLICATION_STATUSES,
+  draftOutreach,
   fileUrl,
   findContact,
   getApplication,
   updateApplication,
   type ApplicationDetail as ApplicationDetailType,
   type ContactCandidate,
+  type OutreachDraftResult,
 } from "../api";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -160,6 +162,10 @@ export default function ApplicationDetail() {
   const [contactMessage, setContactMessage] = useState<string | null>(null);
   const [showCandidates, setShowCandidates] = useState(false);
   const [savingContact, setSavingContact] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [outreachResult, setOutreachResult] = useState<OutreachDraftResult | null>(null);
+  const [outreachError, setOutreachError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -226,6 +232,28 @@ export default function ApplicationDetail() {
     } finally {
       setSavingContact(false);
     }
+  }
+
+  async function handleDraftOutreach() {
+    if (!app) return;
+    setDrafting(true);
+    setOutreachError(null);
+    setCopied(false);
+    try {
+      const result = await draftOutreach(app.id);
+      setOutreachResult(result);
+      setApp({ ...app, outreach_draft_path: result.draft_path });
+    } catch (err) {
+      setOutreachError(err instanceof Error ? err.message : "Failed to draft outreach email");
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  async function handleCopyOutreach() {
+    if (!outreachResult) return;
+    await navigator.clipboard.writeText(`Subject: ${outreachResult.subject}\n\n${outreachResult.body_text}`);
+    setCopied(true);
   }
 
   if (error)
@@ -402,6 +430,54 @@ export default function ApplicationDetail() {
             <PersonIcon /> {contactSearching ? "Searching…" : "Find hiring contact"}
           </button>
         )}
+      </Section>
+
+      <Section title="Outreach draft">
+        <p className="mb-3 text-[11px] text-[#4a5468]">
+          A short, hand-editable email draft — never sent automatically. Copy it, edit it, and send it yourself.
+        </p>
+        {outreachError && <p className="mb-3 text-sm text-[#f87171]">{outreachError}</p>}
+        {outreachResult && (
+          <div className="mb-3 space-y-3 rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
+            <div>
+              <span className="text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">Subject</span>
+              <div className="mt-0.5 text-sm text-[#e4e8f0]">{outreachResult.subject}</div>
+            </div>
+            <div>
+              <span className="text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">Body</span>
+              <p className="mt-0.5 whitespace-pre-wrap text-sm text-[#9db3c9]">{outreachResult.body_text}</p>
+            </div>
+            <button
+              onClick={handleCopyOutreach}
+              className="rounded-md border border-[#232b3a] px-3 py-1.5 text-xs font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
+            >
+              {copied ? "Copied" : "Copy"}
+            </button>
+            {outreachResult.validation_log.length > 0 && (
+              <details>
+                <summary className="cursor-pointer text-sm text-[#6b7690] hover:text-[#e4e8f0]">
+                  Show technical validation log
+                </summary>
+                <p className="mt-2 text-xs text-[#4a5468]">
+                  Internal guardrail activity (references master resume bullet ids) — kept for auditing, not
+                  meant to be polished reading.
+                </p>
+                <ul className="mt-1 space-y-1 font-mono text-xs text-[#4a5468]">
+                  {outreachResult.validation_log.map((line, i) => (
+                    <li key={i}>— {line}</li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+        )}
+        <button
+          onClick={handleDraftOutreach}
+          disabled={drafting}
+          className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0] disabled:opacity-60"
+        >
+          {drafting ? "Drafting…" : outreachResult ? "Regenerate" : "Draft outreach email"}
+        </button>
       </Section>
 
       {tr && (

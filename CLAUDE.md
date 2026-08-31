@@ -19,7 +19,7 @@ agents/
   tailor.py
   cover_letter.py          # Stage 4, opt-in per run -- see ARCHITECTURE.md
   find_contact.py          # Stage 5, on-demand per application -- see ARCHITECTURE.md
-  draft_outreach.py        # not yet built (Phase 5)
+  draft_outreach.py        # Stage 6, on-demand per application, draft-only -- see ARCHITECTURE.md
 render/
   render.py                # builds docx (python-docx) + pdf (reportlab) programmatically,
                             # no template file -- see ARCHITECTURE.md Stage 3
@@ -32,7 +32,7 @@ outputs/
     <Firstname>_<Lastname>_<Company>_<Role>.docx
     <Firstname>_<Lastname>_<Company>_<Role>.pdf
     <Firstname>_<Lastname>_<Company>_<Role>_Cover_Letter.docx/.pdf  # only when requested
-    outreach_draft.md      # not yet built (Phase 5)
+    outreach_draft.md      # only when requested -- re-editable draft, overwritten on regeneration
 ```
 
 ## Hard rules — do not violate these
@@ -58,6 +58,7 @@ outputs/
 - `python agents/tailor.py --jd-json ... --score-json ... [--mode honest|aggressive]` — Stage 2 alone
 - `python agents/cover_letter.py --jd-json ... --tailored-resume-json ...` — Stage 4 alone (needs a `tailored_resume` dict, not the raw master resume)
 - `python agents/find_contact.py --company "Some Company"` — Stage 5 alone. Needs `HUNTER_API_KEY` in `.env` (free plan, 50 credits/month — sign up at hunter.io; Apollo.io is not usable here, see hard rule 3).
+- `python agents/draft_outreach.py --jd-json ... --tailored-resume-json ... --company ... [--contact-name ...] [--has-cover-letter]` — Stage 6 alone. Draft-only, never sends anything (hard rule 2).
 - `python render/render.py --tailored-json ... --company ... --role ...` — Stage 3 alone
 - `cd review/backend && uvicorn main:app --reload --port 8000` — start the review API (needs `.env` at repo root). **`--reload` only watches `review/backend/` by default — it does NOT pick up edits to `agents/*.py`, `apply.py`, or `render/render.py`, since those live outside that directory.** After editing anything outside `review/backend/`, restart the uvicorn process manually (kill it and relaunch) — confirmed the hard way: a long-running server silently served pre-fix `tailor.py` code for an entire debugging session because of this. Don't assume a running dashboard reflects the latest agent/pipeline code without checking when the backend process was last started.
 - `cd review/frontend && npm run dev` — start the review web UI (http://localhost:5173), needs the backend running

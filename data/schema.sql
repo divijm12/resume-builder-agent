@@ -30,6 +30,11 @@ CREATE TABLE applications (
   contact_email TEXT,
   contact_source TEXT,
   contact_verified INTEGER DEFAULT 0,
+  -- Path to a generated, hand-editable outreach email draft (Stage 6,
+  -- agents/draft_outreach.py) -- overwritten in place on regeneration,
+  -- unlike resume_variant_path/cover_letter_path which are never
+  -- overwritten (this is a scratch draft, not the submitted artifact).
+  outreach_draft_path TEXT,
   outreach_sent_at TEXT,
   response_received INTEGER DEFAULT 0,
   notes TEXT
