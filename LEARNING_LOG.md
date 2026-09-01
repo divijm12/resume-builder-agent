@@ -899,4 +899,54 @@ behind it.
 
 ---
 
+## 18. A URL is data, not a claim -- and why editable beats "trust the model"
+
+Three small, unrelated-sounding requests landed together after the send
+button shipped: make the draft editable in the UI, stop saying "tailored
+resume" to a recruiter who doesn't care about that framing, and add a
+second email type that explicitly asks for a referral against one
+specific job posting (gated on the user pasting in a real link). The
+first two were quick prompt/UI fixes. The third one surfaced a bug this
+project's own guardrail machinery was specifically designed to catch --
+just not on the input it was built for.
+
+The referral prompt told the model to include the job posting URL
+verbatim inside its answer. The very first mocked test written for this
+(before any real API call) failed in a way worth sitting with: the URL
+`https://acme.com/careers/software-engineer-123` got treated as
+containing an unverified number, `123`, and the numeric-fabrication
+guardrail (built for catching an invented percentage or headcount)
+dropped the entire sentence -- URL included. The guardrail was doing
+exactly its job; it just had no way to know a job-id number in a URL
+isn't the same kind of claim as "reduced latency by 40%." Structurally
+they look identical to a regex.
+
+The fix wasn't a smarter regex or a URL-shaped exception carved into the
+numeric checker -- it was noticing the URL didn't need to be something
+the *model* produced at all. It's not a claim about the candidate; it's
+a piece of data the user already typed in, known verbatim before the API
+call even happens. So it stopped being part of the model's citation-
+checked output and became a deterministic line of code appends after
+validation, the same move already made for the sign-off a day earlier.
+Verified the fix held even in the failure case: ran it for real against
+Snowflake's data and the model *did* write the raw URL anyway despite
+the instruction not to -- that specific sentence got correctly dropped
+by the numeric guardrail exactly as designed, and the email still came
+out complete and sendable, because the link line never depended on that
+sentence surviving. The bug only ever mattered when the link's fate rode
+on the model's compliance; once it didn't, the guardrail catching a bad
+sentence became a non-event instead of a broken email.
+
+The editable-UI change is worth naming as a design principle, not just a
+UI nicety: everything built so far in this project treats the model's
+output as either good enough to ship as-is or dropped by a guardrail --
+there was no third option where a human just fixes the one thing that's
+off. Making the draft a real text field before send closes that gap
+cheaply. A soft validation flag (the length check, the JD-relevance
+check) was always "worth a second look, not a hard stop" in principle;
+until this change, there was nowhere to act on that second look except
+regenerating and hoping. Now there is.
+
+---
+
 *(more entries added as this project continues)*

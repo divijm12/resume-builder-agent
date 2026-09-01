@@ -203,8 +203,17 @@ export function findContact(id: number): Promise<FindContactResult> {
   return request(`/api/applications/${id}/find-contact`, { method: "POST" });
 }
 
-export function draftOutreach(id: number): Promise<OutreachDraftResult> {
-  return request(`/api/applications/${id}/draft-outreach`, { method: "POST" });
+export type OutreachEmailType = "cold" | "referral";
+
+export function draftOutreach(
+  id: number,
+  emailType: OutreachEmailType = "cold",
+  jobLink?: string,
+): Promise<OutreachDraftResult> {
+  return request(`/api/applications/${id}/draft-outreach`, {
+    method: "POST",
+    body: JSON.stringify({ email_type: emailType, job_link: jobLink || undefined }),
+  });
 }
 
 /** Actually sends the email via the connected Gmail account -- irreversible.

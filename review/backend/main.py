@@ -192,14 +192,30 @@ def find_application_contact(app_id: int):
     )
 
 
+class DraftOutreachRequest(BaseModel):
+    email_type: str = "cold"  # "cold" | "referral"
+    job_link: Optional[str] = None
+
+
 @app.post("/api/applications/{app_id}/draft-outreach")
-def draft_application_outreach(app_id: int):
+def draft_application_outreach(app_id: int, body: DraftOutreachRequest):
     """Generate a short, hand-editable outreach email draft (Stage 6).
     Draft-only, per CLAUDE.md hard rule 2 -- writes a scratch .md file next
     to the resume/cover letter and records its path, but never sends
     anything and never requires a saved contact first (see
     agents/draft_outreach.py's module docstring for the greeting fallback
-    that degrades gracefully when no contact is saved yet)."""
+    that degrades gracefully when no contact is saved yet).
+
+    email_type="referral" requires job_link -- there's no code path here
+    or in draft_outreach.py that produces a referral draft without one,
+    which is the actual enforcement behind "a referral ask can't be sent
+    without a job link": nothing to send without a draft, no draft
+    without a link."""
+    if body.email_type not in draft_outreach.EMAIL_TYPES:
+        raise HTTPException(400, f"email_type must be one of {draft_outreach.EMAIL_TYPES}")
+    if body.email_type == "referral" and not body.job_link:
+        raise HTTPException(400, "job_link is required for a referral request email")
+
     conn = _get_db()
     try:
         row = conn.execute(
@@ -228,6 +244,8 @@ def draft_application_outreach(app_id: int):
         row["company"],
         contact_name=contact_name,
         has_cover_letter=bool(row["cover_letter_path"]),
+        email_type=body.email_type,
+        job_link=body.job_link,
     )
     if not result["body_text"].strip():
         raise HTTPException(

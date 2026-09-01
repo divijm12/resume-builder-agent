@@ -40,6 +40,13 @@ hard drop -- a real accomplishment can be relevant through a genuine
 synonym a keyword check can't catch (e.g. resume says "Kafka", JD says
 "streaming systems"), so a false positive here should read as "worth a
 second look," never "this is wrong."
+
+Two email types (added 2026-08-31): "cold" (the original design, a short
+outreach note) and "referral" (explicitly asks the recipient for a
+referral against one specific job posting). Referral drafts require a
+`job_link` -- there's no code path that can generate one without it, so
+"a referral email can't be sent until a job link is provided" is
+enforced transitively: no link in, no draft out, nothing to send.
 """
 
 import argparse
@@ -58,6 +65,8 @@ from cover_letter import CoverLetterClaim, _bullet_lookup, _strip_em_dashes, val
 load_dotenv()
 
 DEFAULT_MODEL = "claude-haiku-4-5"
+
+EMAIL_TYPES = ("cold", "referral")
 
 # User-specified target -- a real outreach note, not a mini cover letter.
 # Enforced in the prompt; checked here only as a soft, logged flag (never a
@@ -95,13 +104,33 @@ def _jd_keyword_set(jd_parsed: dict) -> set:
     return tokens
 
 
-SYSTEM_PROMPT = (
+_SHARED_RULES = (
+    "\n\nKeep every sentence short enough to say in one breath. This is an email someone "
+    "dashes off, not a polished paragraph. The entire body must fit under 500 "
+    "characters total (roughly 80-90 words) -- this is a strict budget, not a "
+    "suggestion. If your draft is running long, cut detail rather than cutting the "
+    "greeting, the reason you're writing, or the core ask.\n\n"
+    "Avoid every tell of AI-generated writing. Never use an em dash (the '--' or '—' "
+    "character) anywhere -- use a period, comma, or semicolon instead. Do not lean on "
+    "tricolon lists. Avoid stock phrases like 'I'm excited/passionate about', 'I "
+    "would welcome the opportunity to', 'I wanted to reach out regarding', or any "
+    "sentence that could be copy-pasted into a different candidate's email to a "
+    "different company without changing a word. This should read like one specific "
+    "person wrote it quickly and meant it, not like a template.\n\n"
+    "Every claim that states a specific fact, number, or named skill must cite the "
+    "tailored resume bullet id(s) it's drawn from in source_bullet_ids. The greeting, "
+    "the reason-you're-writing sentence, and the attachment mention assert no specific "
+    "fact and can have an empty source_bullet_ids list. A claim you can't honestly "
+    "cite to a real bullet shouldn't be written at all."
+)
+
+SYSTEM_PROMPT_COLD = (
     "You write a short outreach email a candidate will send to a real person at a "
     "company they're applying to, grounded only in the tailored resume content given "
     "to you -- you may NEVER invent an experience, metric, skill, or claim that isn't "
     "already there. This is a cold or warm outreach note, not a cover letter: short, "
-    "plain sentences, not a full letter. It accompanies (doesn't replace) the tailored "
-    "resume, and a cover letter too if one exists.\n\n"
+    "plain sentences, not a full letter. It accompanies (doesn't replace) the resume, "
+    "and a cover letter too if one exists.\n\n"
     "Structure your output as paragraphs (in the paragraphs field) like this: the "
     "FIRST paragraph must contain ONLY the greeting -- nothing else, e.g. 'Hi Jane,' "
     "or 'Hi there,'. The remaining paragraph(s) hold everything else. Do NOT write a "
@@ -118,29 +147,40 @@ SYSTEM_PROMPT = (
     "that reads like a cover letter paragraph, not a quick email. Pick the single "
     "most relevant accomplishment and describe ONLY that one; naming a second or "
     "third thing the candidate also did is the most common way this goes over length. "
-    "Mention that a "
-    "tailored resume is attached, and a cover letter too if told one exists -- this "
-    "can be a short standalone sentence, it doesn't need to absorb the hook sentence "
-    "too. Close with a light, low-pressure call to action (e.g. open to a quick chat, "
-    "happy to answer questions).\n\n"
-    "Keep every sentence short enough to say in one breath. This is an email someone "
-    "dashes off, not a polished paragraph. The entire body must fit under 500 "
-    "characters total (roughly 80-90 words) -- this is a strict budget, not a "
-    "suggestion. If your draft is running long, cut the hook down to fewer words or "
-    "shorten the call to action; never cut the greeting, the reason you're writing, "
-    "or the sign-off to make room.\n\n"
-    "Avoid every tell of AI-generated writing. Never use an em dash (the '--' or '—' "
-    "character) anywhere -- use a period, comma, or semicolon instead. Do not lean on "
-    "tricolon lists. Avoid stock phrases like 'I'm excited/passionate about', 'I "
-    "would welcome the opportunity to', 'I wanted to reach out regarding', or any "
-    "sentence that could be copy-pasted into a different candidate's email to a "
-    "different company without changing a word. This should read like one specific "
-    "person wrote it quickly and meant it, not like a template.\n\n"
-    "Every claim that states a specific fact, number, or named skill must cite the "
-    "tailored resume bullet id(s) it's drawn from in source_bullet_ids. The greeting, "
-    "the 'I'm applying for X' sentence, and the attachment mention assert no specific "
-    "fact and can have an empty source_bullet_ids list. A claim you can't honestly "
-    "cite to a real bullet shouldn't be written at all."
+    "Mention that your resume is attached, and a cover letter too if told one exists "
+    "-- just call it 'my resume', never 'my tailored resume' or similar; a recruiter "
+    "doesn't care about that framing, only that it's there. This can be a short "
+    "standalone sentence, it doesn't need to absorb the hook sentence too. Close with "
+    "a light, low-pressure call to action (e.g. open to a quick chat, happy to answer "
+    "questions)." + _SHARED_RULES
+)
+
+SYSTEM_PROMPT_REFERRAL = (
+    "You write a short email a candidate will send to a real contact at a company, "
+    "explicitly asking for a referral for ONE SPECIFIC job posting -- grounded only in "
+    "the tailored resume content given to you, you may NEVER invent an experience, "
+    "metric, skill, or claim that isn't already there. This is a referral ask, not a "
+    "cover letter or a general networking note: be direct about what you're asking "
+    "for.\n\n"
+    "Structure your output as paragraphs (in the paragraphs field) like this: the "
+    "FIRST paragraph must contain ONLY the greeting -- nothing else, e.g. 'Hi Jane,' "
+    "or 'Hi there,'. The remaining paragraph(s) hold everything else. Do NOT write a "
+    "sign-off or closing (no 'Best,', no name, no email) -- that is added "
+    "automatically afterward.\n\n"
+    "Greet the recipient by name if one is given; otherwise use a neutral 'Hi there,' "
+    "-- never invent a name. Name the specific role and company. Do NOT write out the "
+    "job posting URL yourself -- it will be inserted automatically on its own line "
+    "after your text, so just refer to it naturally in a sentence ('the role I "
+    "mentioned', 'the posting below', 'this role') rather than typing any version of "
+    "the link. Directly ask if they'd be willing to refer you "
+    "for that role, or point you to the right person -- this ask is the point of the "
+    "email, not an afterthought at the end. You may include at most ONE short, "
+    "specific hook connecting the candidate's real background to the role, only if it "
+    "genuinely strengthens the ask -- omit it entirely rather than force one in. "
+    "Explicitly acknowledge they may not be able to help, so there's no pressure "
+    "(e.g. 'no worries at all if not'). Mention that your resume is attached, and a "
+    "cover letter too if told one exists -- just call it 'my resume', never 'my "
+    "tailored resume'." + _SHARED_RULES
 )
 
 
@@ -155,6 +195,8 @@ def generate_outreach_draft(
     company: str,
     contact_name: Optional[str] = None,
     has_cover_letter: bool = False,
+    email_type: str = "cold",
+    job_link: Optional[str] = None,
     model: str = DEFAULT_MODEL,
 ) -> dict:
     """Produce a short outreach email draft grounded in the tailored resume.
@@ -162,12 +204,27 @@ def generate_outreach_draft(
     contact_name should already reflect the caller's own fallback order
     (saved contact -> JD-stated hiring manager -> None) -- this function
     just uses whatever it's given, or a neutral greeting if given nothing.
+
+    email_type="referral" requires job_link -- raises ValueError otherwise.
+    This is the actual enforcement behind "a referral email can't be sent
+    without a job link": there is no code path that produces a referral
+    draft without one, so there's never a referral draft to send that
+    lacks it.
     """
+    if email_type not in EMAIL_TYPES:
+        raise ValueError(f"email_type must be one of {EMAIL_TYPES}, got {email_type!r}")
+    if email_type == "referral" and not job_link:
+        raise ValueError("job_link is required when email_type='referral'")
+
     client = anthropic.Anthropic()
     context_lines = [
         f"Company: {company}",
         f"Recipient name: {contact_name if contact_name else '(none given -- use a neutral greeting)'}",
         f"A cover letter also exists for this application: {has_cover_letter}",
+    ]
+    if email_type == "referral":
+        context_lines.append(f"Job posting link (include verbatim): {job_link}")
+    context_lines += [
         "",
         f"Job description (parsed):\n{json.dumps(jd_parsed, indent=2)}",
         "",
@@ -175,11 +232,12 @@ def generate_outreach_draft(
         f"from here):\n{yaml.dump(tailored_resume, sort_keys=False)}",
     ]
     user_content = "\n".join(context_lines)
+    system_prompt = SYSTEM_PROMPT_REFERRAL if email_type == "referral" else SYSTEM_PROMPT_COLD
 
     response = client.messages.parse(
         model=model,
         max_tokens=2048,
-        system=SYSTEM_PROMPT,
+        system=system_prompt,
         messages=[{"role": "user", "content": user_content}],
         output_format=OutreachDraftSchema,
     )
@@ -225,6 +283,16 @@ def generate_outreach_draft(
             "Greeting and body may not be on separate lines (no paragraph break found) "
             "-- worth a manual formatting pass before sending."
         )
+    # The job link is inserted here, never written by the model -- a URL
+    # often contains a numeric job id (e.g. ".../role-12345"), and asking
+    # the model to reproduce it inside a citation-checked claim made the
+    # numeric-fabrication guardrail treat that id as an unverified number
+    # and drop the whole sentence (caught by this file's own mocked tests
+    # before any real API call). Same "compute what's fully mechanical
+    # instead of trusting the model to reproduce it" move as the sign-off
+    # below -- guarantees the link is always present and always exact.
+    if email_type == "referral" and body_text.strip():
+        body_text = body_text + f"\n\nJob posting: {job_link}"
 
     # Sign-off is built here, never by the model -- guarantees the exact
     # "Warm regards, / Name / Email" line-per-field format every time,
@@ -256,6 +324,8 @@ def main():
     parser.add_argument("--company", required=True, help="Company name")
     parser.add_argument("--contact-name", default=None, help="Recipient name, if known")
     parser.add_argument("--has-cover-letter", action="store_true", help="Mention that a cover letter also exists")
+    parser.add_argument("--email-type", choices=EMAIL_TYPES, default="cold", help="cold or referral (default: cold)")
+    parser.add_argument("--job-link", default=None, help="Job posting URL -- required for --email-type referral")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model to use (default: {DEFAULT_MODEL})")
     args = parser.parse_args()
 
@@ -268,6 +338,8 @@ def main():
         args.company,
         contact_name=args.contact_name,
         has_cover_letter=args.has_cover_letter,
+        email_type=args.email_type,
+        job_link=args.job_link,
         model=args.model,
     )
     print(json.dumps(result, indent=2))

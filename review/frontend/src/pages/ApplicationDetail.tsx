@@ -11,6 +11,7 @@ import {
   type ApplicationDetail as ApplicationDetailType,
   type ContactCandidate,
   type OutreachDraftResult,
+  type OutreachEmailType,
 } from "../api";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -243,6 +244,13 @@ export default function ApplicationDetail() {
   const [outreachResult, setOutreachResult] = useState<OutreachDraftResult | null>(null);
   const [outreachError, setOutreachError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [emailType, setEmailType] = useState<OutreachEmailType>("cold");
+  const [jobLink, setJobLink] = useState("");
+  // Editable copies of the generated draft -- what actually gets copied/sent
+  // is whatever's here, not outreachResult's original text, so hand-edits
+  // before sending are real. Reset from outreachResult on every new draft.
+  const [editedSubject, setEditedSubject] = useState("");
+  const [editedBody, setEditedBody] = useState("");
   const [showSendConfirm, setShowSendConfirm] = useState(false);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
@@ -316,12 +324,15 @@ export default function ApplicationDetail() {
 
   async function handleDraftOutreach() {
     if (!app) return;
+    if (emailType === "referral" && !jobLink.trim()) return;
     setDrafting(true);
     setOutreachError(null);
     setCopied(false);
     try {
-      const result = await draftOutreach(app.id);
+      const result = await draftOutreach(app.id, emailType, emailType === "referral" ? jobLink.trim() : undefined);
       setOutreachResult(result);
+      setEditedSubject(result.subject);
+      setEditedBody(result.body_text);
       setApp({ ...app, outreach_draft_path: result.draft_path });
     } catch (err) {
       setOutreachError(err instanceof Error ? err.message : "Failed to draft outreach email");
@@ -331,17 +342,16 @@ export default function ApplicationDetail() {
   }
 
   async function handleCopyOutreach() {
-    if (!outreachResult) return;
-    await navigator.clipboard.writeText(`Subject: ${outreachResult.subject}\n\n${outreachResult.body_text}`);
+    await navigator.clipboard.writeText(`Subject: ${editedSubject}\n\n${editedBody}`);
     setCopied(true);
   }
 
   async function handleConfirmSend() {
-    if (!app || !outreachResult) return;
+    if (!app) return;
     setSending(true);
     setSendError(null);
     try {
-      const result = await sendOutreach(app.id, outreachResult.subject, outreachResult.body_text);
+      const result = await sendOutreach(app.id, editedSubject, editedBody);
       setApp({ ...app, outreach_sent_at: result.sent_at, status: "outreach_sent" });
       setShowSendConfirm(false);
     } catch (err) {
@@ -529,8 +539,8 @@ export default function ApplicationDetail() {
 
       <Section title="Outreach draft">
         <p className="mb-3 text-[11px] text-[#4a5468]">
-          A short, hand-editable email draft. Copy it and send it yourself, or send it directly from here once
-          you've saved a contact — every send requires an explicit confirmation with the exact text shown first.
+          A short email draft, editable right here before you copy or send it — every send requires an explicit
+          confirmation showing the exact final text first.
         </p>
         {outreachError && <p className="mb-3 text-sm text-[#f87171]">{outreachError}</p>}
         {app.outreach_sent_at && (
@@ -538,15 +548,55 @@ export default function ApplicationDetail() {
             Sent to {app.contact_email} on {new Date(app.outreach_sent_at).toLocaleString()}
           </p>
         )}
+        <div className="mb-3 flex items-center gap-1.5">
+          <button
+            onClick={() => setEmailType("cold")}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+              emailType === "cold"
+                ? "border-[#4fd6f0] text-[#4fd6f0]"
+                : "border-[#232b3a] text-[#6b7690] hover:text-[#e4e8f0]"
+            }`}
+          >
+            Cold email
+          </button>
+          <button
+            onClick={() => setEmailType("referral")}
+            className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+              emailType === "referral"
+                ? "border-[#4fd6f0] text-[#4fd6f0]"
+                : "border-[#232b3a] text-[#6b7690] hover:text-[#e4e8f0]"
+            }`}
+          >
+            Ask for referral
+          </button>
+        </div>
+        {emailType === "referral" && (
+          <input
+            type="url"
+            value={jobLink}
+            onChange={(e) => setJobLink(e.target.value)}
+            placeholder="Paste the job posting link (required)"
+            className="mb-3 w-full rounded-md border border-[#232b3a] bg-[#10141d] px-3 py-2 text-sm text-[#e4e8f0] placeholder:text-[#4a5468] focus:border-[#4fd6f0] focus:outline-none"
+          />
+        )}
         {outreachResult && (
           <div className="mb-3 space-y-3 rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
             <div>
               <span className="text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">Subject</span>
-              <div className="mt-0.5 text-sm text-[#e4e8f0]">{outreachResult.subject}</div>
+              <input
+                value={editedSubject}
+                onChange={(e) => setEditedSubject(e.target.value)}
+                className="mt-0.5 w-full rounded-md border border-[#1c2431] bg-transparent px-2 py-1 text-sm text-[#e4e8f0] focus:border-[#4fd6f0] focus:outline-none"
+              />
             </div>
             <div>
               <span className="text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">Body</span>
-              <p className="mt-0.5 whitespace-pre-wrap text-sm text-[#9db3c9]">{outreachResult.body_text}</p>
+              <textarea
+                value={editedBody}
+                onChange={(e) => setEditedBody(e.target.value)}
+                rows={10}
+                className="mt-0.5 w-full resize-y rounded-md border border-[#1c2431] bg-transparent px-2 py-1.5 text-sm text-[#9db3c9] focus:border-[#4fd6f0] focus:outline-none"
+              />
             </div>
             <div className="flex items-center gap-2">
               <button
@@ -586,18 +636,24 @@ export default function ApplicationDetail() {
         )}
         <button
           onClick={handleDraftOutreach}
-          disabled={drafting}
+          disabled={drafting || (emailType === "referral" && !jobLink.trim())}
           className="flex items-center gap-2 rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0] disabled:opacity-60"
         >
-          {drafting ? "Drafting…" : outreachResult ? "Regenerate" : "Draft outreach email"}
+          {drafting
+            ? "Drafting…"
+            : outreachResult
+              ? "Regenerate"
+              : emailType === "referral"
+                ? "Draft referral email"
+                : "Draft outreach email"}
         </button>
       </Section>
 
       {showSendConfirm && outreachResult && app.contact_email && (
         <SendConfirmModal
           toEmail={app.contact_email}
-          subject={outreachResult.subject}
-          bodyText={outreachResult.body_text}
+          subject={editedSubject}
+          bodyText={editedBody}
           validationLog={outreachResult.validation_log}
           sending={sending}
           error={sendError}
