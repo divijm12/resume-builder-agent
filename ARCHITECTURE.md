@@ -100,7 +100,7 @@ This DB is the actual product. After ~30 applications, you can query which bulle
 
 ## 3. Pipeline stages (agents)
 
-Each stage = one Claude Code subagent / skill with a narrow job.
+Each stage = one standalone Python function with a narrow job, calling the Anthropic API (or Hunter.io, for contact discovery) directly — not a Claude Code subagent or skill. See section 4.
 
 ### Stage -1 — Master Resume Onboarding
 Built 2026-09-01 (`agents/parse_resume.py`), because there was no way for
@@ -290,7 +290,7 @@ in JD"`. **This only ever adds or re-labels, never removes or replaces**
 still present, exactly the guarantee already established for the
 department-boost feature above, extended to a stronger, name-specific
 signal. Verified live against Anduril Industries with
-`hiring_manager_name: "Camrin Opp"` (a real contact from an earlier test):
+`hiring_manager_name` set to a real contact's name from an earlier test:
 came back correctly deduped against the same person Domain Search already
 returned, relabeled `"Named in JD"`, sorted first -- all 9 other real
 contacts, including the previous top-ranked department match, still fully
@@ -443,7 +443,7 @@ Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refer
 - **Language:** Python (best library support for resume parsing, email APIs, SQLite)
 - **State:** SQLite (`applications.db`) — simple, local, queryable
 - **Resume source of truth:** YAML
-- **Orchestration:** standalone Python scripts in `agents/`, one per pipeline stage, each calling the Anthropic API directly (see CLAUDE.md) — not Claude Code skills
+- **Orchestration:** standalone Python scripts in `agents/`, one per pipeline stage (see CLAUDE.md) — not Claude Code skills; all but Stage 5 (contact discovery, which calls Hunter.io instead) call the Anthropic API directly
 - **Email verification/finding:** Hunter.io API only — Apollo.io was considered but its free plan has no API access at all (see Stage 5)
 - **Sending:** Gmail SMTP + an App Password (see Stage 7), draft-then-confirm — never a blind/automatic send
 - **Rendering:** `python-docx` for `.docx`, `reportlab` for `.pdf` (independent renders, not a docx→pdf conversion — see Stage 3 notes)

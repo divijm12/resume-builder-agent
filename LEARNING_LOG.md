@@ -705,7 +705,7 @@ Tested four cases with mocked data before spending anything real — found
 + already-present (dedup), found + new person (added, list still has
 everyone else), not found (list unaffected), and no name given at all
 (identical to before this feature existed) — then verified live against
-Anduril Industries with a real name from an earlier test ("Camrin Opp"):
+Anduril Industries with a real contact's name from an earlier test:
 came back deduped, relabeled, and sorted first, with the other 9 real
 contacts, including the previous top department match, still fully
 present underneath. The rule "boost, never filter or replace" from the

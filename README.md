@@ -2,7 +2,7 @@
 
 A personal job-application pipeline: paste a job description, and it scores it against your resume, generates a tailored resume + cover letter, finds a verified hiring contact, drafts outreach, and tracks everything in a local database — with a review-and-approve step before anything is ever sent.
 
-Every agent is a small, single-purpose Python function calling the Anthropic API — no framework, no autonomous loop. The interesting engineering isn't the prompts; it's the guardrails wrapped around them that make the output trustworthy enough to actually send.
+Every agent is a small, single-purpose Python function — most call the Anthropic API directly; contact discovery calls Hunter.io instead. No framework, no autonomous loop. The interesting engineering isn't the prompts; it's the guardrails wrapped around them that make the output trustworthy enough to actually send.
 
 **Contents:** [Why not just a chat window](#why-this-instead-of-just-pasting-into-a-chat-window) · [How it works](#how-it-works) · [A guardrail, concretely](#a-guardrail-concretely) · [Features](#features) · [Setup](#setup) · [CLI usage](#using-it-from-the-command-line-instead) · [Design docs](#project-structure-and-design-docs) · [Testing](#testing) · [Tech stack](#tech-stack)
 
@@ -67,7 +67,7 @@ Nothing here is technically false — the number's untouched, no skill was inven
 
 ## Setup
 
-**Requirements:** Python 3.10+, Node 18+, an [Anthropic API key](https://console.anthropic.com/).
+**Requirements:** Python 3.10+ (the strictest floor among dependencies — FastAPI and the Anthropic SDK both require it), Node 20.19+ or 22.12+ (Vite 8's own requirement), an [Anthropic API key](https://console.anthropic.com/).
 
 ```bash
 git clone <this-repo>
@@ -108,7 +108,7 @@ render/              docx + pdf rendering, one-page layout search
 review/backend/      FastAPI: wraps the pipeline as a job-polling REST API
 review/frontend/     React dashboard: paste-JD-to-review
 data/                schema.sql (tracked) + the resume library/DB themselves (gitignored, personal data)
-tests/               52 mocked regression tests, one file per module
+tests/               52 mocked regression tests, one file per guardrail-bearing module
 ```
 
 - **`ARCHITECTURE.md`** — data model, every pipeline stage, guardrails, tech stack
