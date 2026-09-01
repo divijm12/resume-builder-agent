@@ -14,7 +14,7 @@ import gmail_client
 
 def test_mime_construction_and_base64url_roundtrip():
     message = EmailMessage()
-    message.set_content("Hi Jane,\n\nTest body.\n\nWarm regards,\nDivij Mittal")
+    message.set_content("Hi Jane,\n\nTest body.\n\nWarm regards,\nAlex Rivera")
     message["To"] = "jane@example.com"
     message["Subject"] = "Test Subject"
 

@@ -1085,8 +1085,8 @@ previous session) gives local point-in-time recovery without that
 tradeoff.
 
 **Verification, in the same order as every feature before it:** file
-migration first (Divij's committed resume and the uncommitted Harshpreet
-data split into two named library entries, confirmed byte-for-byte via a
+migration first (the user's own committed resume and a second,
+uncommitted test resume split into two named library entries, confirmed byte-for-byte via a
 direct diff before either was touched further), then a DB migration on
 the real, populated database (non-destructive `ALTER TABLE`, backfilling
 the two existing real applications with `"Main Resume"` since that was

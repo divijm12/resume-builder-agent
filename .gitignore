@@ -15,6 +15,9 @@ venv/
 # OS
 .DS_Store
 
+# Claude Code local settings (per-machine, not shared)
+.claude/
+
 # Frontend (review/frontend)
 node_modules/
 dist/
