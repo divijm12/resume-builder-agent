@@ -1,6 +1,7 @@
 # Local data / secrets — not shared
 .env
 data/applications.db
+data/master_resume_backups/
 outputs/
 
 # Python

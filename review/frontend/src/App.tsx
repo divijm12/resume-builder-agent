@@ -34,6 +34,18 @@ export default function App() {
             >
               Applications
             </NavLink>
+            <NavLink
+              to="/master-resume"
+              className={({ isActive }) =>
+                `rounded-md border px-4 py-2 transition-colors ${
+                  isActive
+                    ? "border-[#232b3a] bg-[#141924] text-[#e4e8f0]"
+                    : "border-transparent text-[#6b7690] hover:text-[#e4e8f0]"
+                }`
+              }
+            >
+              Resume
+            </NavLink>
           </nav>
         </div>
       </header>

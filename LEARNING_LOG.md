@@ -982,4 +982,62 @@ Snowflake/Jobright rows were untouched throughout.
 
 ---
 
+## 20. The first agent whose job is fidelity, not selection
+
+Every agent built so far shares one assumption: `master_resume.yaml` is
+already trusted, already correct, already someone's real reviewed
+history -- tailor.py selects from it, cover_letter.py and
+draft_outreach.py cite it, but none of them ever *create* it. That
+assumption breaks the moment you ask "how does someone new even get a
+master_resume.yaml in the first place" -- a real, necessary question
+before this project could mean anything to an open-source user, not just
+its original one.
+
+The interesting design fork was realizing this new stage's risk profile
+is the mirror image of everything else in the pipeline. Tailoring's
+danger is *adding* something that isn't true. Onboarding's danger is
+*losing* something that already is -- summarizing away a real detail
+while converting free-flowing resume prose into discrete, tagged
+bullets. The existing numeric-fabrication guardrail still applies (a
+number appearing in the structured output that was never anywhere in
+the uploaded resume is exactly as wrong here as an invented metric is in
+a reworded bullet) but it has to run differently: tailor.py always has a
+single original bullet to diff a reworded version against 1:1; this
+stage is doing the segmentation itself, deciding where one bullet ends
+and the next begins, so there's no fixed original to align to. The
+honest fix was checking globally -- every number in the whole draft
+must appear somewhere in the whole source text -- which is a real,
+weaker guarantee (it can't catch a number that leaked into the wrong
+bullet) and worth stating as exactly that rather than quietly presenting
+it as equivalent to the stronger per-bullet check elsewhere.
+
+The other real design tension was what happens when the guardrail
+*does* flag something. Every other guardrail in this project has a safe
+fallback to revert to -- tailor.py reverts to the untouched master
+bullet, the outreach agent drops an unverifiable claim entirely. This
+stage has no fallback: the model's transcription attempt is the only
+candidate content there is. Dropping a flagged bullet wouldn't make the
+resume more correct, it would just silently delete a real
+accomplishment the user would then have to notice is missing and
+re-add by hand anyway. So the design leans harder on the review step
+that already has to exist here regardless (a human confirms before this
+becomes the real source of truth) -- flag it clearly, show the raw
+extracted text right there for comparison, and trust the same "human
+decides" mechanism this project has used for every other judgment call
+it can't safely automate.
+
+Verified end to end with a synthetic fake resume, not the real one:
+mocked tests first (id-assignment matching the real file's exact
+numbering convention, a deliberately fabricated number correctly
+flagged, a real number elsewhere in the source correctly not flagged),
+then a real API call, then the full live path through the actual
+dashboard -- upload, parse, hand-edit, confirm, verify a backup got
+created and the file changed -- and finally restored the user's real
+`master_resume.yaml` from that same backup (plus its own git history,
+since it turned out to already be a tracked file) before ending the
+task, so a test resume was never at risk of becoming the live one used
+for a real application.
+
+---
+
 *(more entries added as this project continues)*

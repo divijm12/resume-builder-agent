@@ -233,3 +233,45 @@ export function sendOutreach(
 export function fileUrl(id: number, type: "pdf" | "docx" | "cover_letter_pdf" | "cover_letter_docx"): string {
   return `${API_BASE}/api/applications/${id}/file?type=${type}`;
 }
+
+export interface MasterResumeSummary {
+  exists: boolean;
+  name?: string;
+  experience_count?: number;
+  project_count?: number;
+  skill_count?: number;
+}
+
+export function getMasterResumeSummary(): Promise<MasterResumeSummary> {
+  return request(`/api/master-resume`);
+}
+
+export interface ParsedResumeResult {
+  draft_yaml: string;
+  validation_log: string[];
+  raw_text: string;
+}
+
+/** Uses a raw fetch, not the shared `request()` helper -- a multipart file
+ * upload needs the browser to set its own Content-Type (with boundary),
+ * which request()'s hardcoded "application/json" header would break. */
+export async function uploadMasterResume(file: File, model: string): Promise<ParsedResumeResult> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/api/master-resume/parse?model=${encodeURIComponent(model)}`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.detail || `Request failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export function confirmMasterResume(yamlText: string): Promise<{ ok: boolean }> {
+  return request(`/api/master-resume/confirm`, {
+    method: "POST",
+    body: JSON.stringify({ yaml_text: yamlText }),
+  });
+}

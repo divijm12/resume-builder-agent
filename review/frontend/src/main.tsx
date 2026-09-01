@@ -5,6 +5,7 @@ import App from "./App.tsx";
 import "./index.css";
 import ApplicationDetail from "./pages/ApplicationDetail.tsx";
 import ApplicationsList from "./pages/ApplicationsList.tsx";
+import MasterResume from "./pages/MasterResume.tsx";
 import NewApplication from "./pages/NewApplication.tsx";
 
 createRoot(document.getElementById("root")!).render(
@@ -15,6 +16,7 @@ createRoot(document.getElementById("root")!).render(
           <Route index element={<ApplicationsList />} />
           <Route path="new" element={<NewApplication />} />
           <Route path="applications/:id" element={<ApplicationDetail />} />
+          <Route path="master-resume" element={<MasterResume />} />
         </Route>
       </Routes>
     </BrowserRouter>

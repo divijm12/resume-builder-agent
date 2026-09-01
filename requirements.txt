@@ -8,3 +8,4 @@ pypdf
 fastapi
 uvicorn[standard]
 requests
+python-multipart

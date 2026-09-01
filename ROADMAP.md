@@ -6,8 +6,9 @@ Build in phases that are each independently useful — don't wait for the full p
 - [x] Convert your current resume into `data/master_resume.yaml`, tagging every bullet by skill/theme
 - [x] Set up `applications.db` schema
 - [x] Set up repo structure (see CLAUDE.md below) and git-init it — you want version history on resume changes
+- [x] Standing "Upload master resume" onboarding -- built 2026-09-01 (`agents/parse_resume.py`, dashboard's "Resume" page), because the original master resume above only existed from manual work; anyone else (or this user, on a refresh) can now upload a `.pdf`/`.docx` any time, review the parsed draft against a fidelity guardrail (flags any number not present in the original text), hand-edit it, and confirm before it becomes the real `data/master_resume.yaml` -- a backup of whatever was there before is made automatically first.
 
-**Done when:** you have a structured resume file and empty DB, no AI yet. ✅ Done 2026-08-27.
+**Done when:** you have a structured resume file and empty DB, no AI yet. ✅ Done 2026-08-27. Onboarding for a *new* user/resume done 2026-09-01.
 
 ## Phase 1 — Score + Tailor (the actual time-saver)
 - [x] JD ingest agent (paste text → parsed JSON)

@@ -10,10 +10,15 @@ A personal job-application pipeline: paste a JD → score against my resume → 
 ```
 apply.py                   # orchestrator: ingest -> score -> tailor -> render -> log
 data/
-  master_resume.yaml       # source of truth, structured, tagged bullets
+  master_resume.yaml       # source of truth, structured, tagged bullets -- replace it any time
+                            # via the dashboard's "Resume" page (upload -> review -> confirm),
+                            # never hand it a raw upload without reviewing the draft first
+  master_resume_backups/   # gitignored -- one timestamped backup made automatically each time
+                            # the dashboard overwrites master_resume.yaml
   schema.sql                # versioned applications.db schema (the .db itself is gitignored)
   applications.db          # SQLite — one row per application
 agents/
+  parse_resume.py          # Stage -1, always-available onboarding -- see ARCHITECTURE.md
   ingest_jd.py
   score.py
   tailor.py
@@ -53,6 +58,7 @@ outputs/
 - When in doubt about a scope decision, default to the more conservative/manual option and ask rather than automating further.
 
 ## Commands
+- `python agents/parse_resume.py --file path/to/resume.txt [--model claude-sonnet-5|claude-haiku-4-5]` — Stage -1 alone (raw text in, draft JSON out, never writes anything). The dashboard's "Resume" page wraps this with file upload (.pdf/.docx) + a review-and-edit step before anything gets saved to `data/master_resume.yaml` — always available, not just a first-run step.
 - `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values, `--mode honest|aggressive` to control tailoring intensity (default `aggressive`; see ARCHITECTURE.md Stage 2 — neither mode fabricates), `--tailor-model <model>` to pick the model for tailoring only (ingest/scoring always use their own fast default — see ARCHITECTURE.md Stage 7), `--cover-letter` to also generate a cover letter (off by default — one more paid API call).
 - `python agents/ingest_jd.py --file path/to/jd.txt` — Stage 0 alone
 - `python agents/score.py --jd-json path/to/jd_parsed.json` — Stage 1 alone

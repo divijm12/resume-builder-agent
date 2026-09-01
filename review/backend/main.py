@@ -14,13 +14,17 @@ this scale (see LEARNING_LOG.md).
 Run from this directory: `uvicorn main:app --reload --port 8000`
 """
 
+import io
 import json
 import sqlite3
 import sys
 import threading
 import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
+
+import yaml
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -32,15 +36,20 @@ load_dotenv(REPO_ROOT / ".env")
 import apply  # noqa: E402  (must follow sys.path insert)
 import find_contact  # noqa: E402  (agents/ is on sys.path via apply's own import above)
 import draft_outreach  # noqa: E402  (agents/ is on sys.path via apply's own import above)
+import parse_resume  # noqa: E402  (agents/ is on sys.path via apply's own import above)
 import gmail_client  # noqa: E402  (same directory as this file)
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from docx import Document
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+from pypdf import PdfReader
 
 DB_PATH = REPO_ROOT / "data" / "applications.db"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
 RESUME_PATH = REPO_ROOT / "data" / "master_resume.yaml"
+RESUME_BACKUPS_DIR = REPO_ROOT / "data" / "master_resume_backups"
+MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB -- generous for a resume, defensive against abuse
 
 app = FastAPI(title="Resume Pipeline Review API")
 app.add_middleware(
@@ -417,6 +426,95 @@ def get_application_file(app_id: int, type: str = "pdf"):
     # the only sensible behavior there -- only PDFs get "inline".
     disposition = "inline" if wants_pdf else "attachment"
     return FileResponse(str(file_path), media_type=media_type, filename=file_path.name, content_disposition_type=disposition)
+
+
+# ---------------------------------------------------------------------------
+# Master resume onboarding -- upload -> parse -> human-reviewed draft ->
+# confirm. Always available (not a one-time setup step), since the master
+# resume is meant to be updated over time, not just created once. Never
+# writes data/master_resume.yaml directly from an upload -- only /confirm
+# does that, and only after a human has seen the parsed draft.
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/master-resume")
+def get_master_resume_summary():
+    """Light stats on the current master resume, so the upload page can
+    show "you currently have X" before someone replaces it. Not an error
+    if none exists yet -- that's the normal state on a fresh clone."""
+    if not RESUME_PATH.exists():
+        return {"exists": False}
+    resume = yaml.safe_load(RESUME_PATH.read_text()) or {}
+    return {
+        "exists": True,
+        "name": (resume.get("basics") or {}).get("name"),
+        "experience_count": len(resume.get("experience") or []),
+        "project_count": len(resume.get("projects") or []),
+        "skill_count": len(resume.get("skills") or []),
+    }
+
+
+@app.post("/api/master-resume/parse")
+async def parse_master_resume(file: UploadFile = File(...), model: str = "claude-sonnet-5"):
+    """Extract text from an uploaded resume (.pdf or .docx) and parse it
+    into a draft master_resume.yaml -- never writes anything. The caller
+    must review the returned draft (and its validation_log) and POST to
+    /confirm to actually save it."""
+    filename = (file.filename or "").lower()
+    if not (filename.endswith(".pdf") or filename.endswith(".docx")):
+        raise HTTPException(400, "Only .pdf or .docx files are supported")
+
+    contents = await file.read()
+    if len(contents) > MAX_RESUME_UPLOAD_BYTES:
+        raise HTTPException(400, f"File too large -- max {MAX_RESUME_UPLOAD_BYTES // (1024 * 1024)}MB")
+
+    try:
+        if filename.endswith(".pdf"):
+            reader = PdfReader(io.BytesIO(contents))
+            raw_text = "\n".join(page.extract_text() or "" for page in reader.pages)
+        else:
+            doc = Document(io.BytesIO(contents))
+            raw_text = "\n".join(p.text for p in doc.paragraphs)
+    except Exception as e:
+        raise HTTPException(400, f"Could not read that file: {e}")
+
+    if not raw_text.strip():
+        raise HTTPException(400, "No text could be extracted from that file -- it may be a scanned image, not real text")
+
+    result = parse_resume.parse_resume_draft(raw_text, model=model)
+    return {
+        "draft_yaml": yaml.dump(result["draft"], sort_keys=False),
+        "validation_log": result["validation_log"],
+        "raw_text": raw_text,
+    }
+
+
+class ConfirmMasterResumeRequest(BaseModel):
+    yaml_text: str
+
+
+@app.post("/api/master-resume/confirm")
+def confirm_master_resume(body: ConfirmMasterResumeRequest):
+    """Write the (possibly hand-edited) reviewed draft as the real
+    master_resume.yaml. Backs up whatever was there before, if anything --
+    a bad upload should never be able to destroy the current file with no
+    way back."""
+    try:
+        parsed = yaml.safe_load(body.yaml_text)
+    except yaml.YAMLError as e:
+        raise HTTPException(400, f"Not valid YAML: {e}")
+
+    if not isinstance(parsed, dict) or not all(k in parsed for k in ("basics", "skills", "experience")):
+        raise HTTPException(400, "Missing required top-level keys: basics, skills, experience")
+
+    if RESUME_PATH.exists():
+        RESUME_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = RESUME_BACKUPS_DIR / f"master_resume_{timestamp}.yaml"
+        backup_path.write_text(RESUME_PATH.read_text())
+
+    RESUME_PATH.write_text(body.yaml_text)
+    return {"ok": True}
 
 
 @app.get("/api/health")
