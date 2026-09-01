@@ -107,7 +107,7 @@ agents/              one pure function per pipeline stage (JSON in, JSON out)
 render/              docx + pdf rendering, one-page layout search
 review/backend/      FastAPI: wraps the pipeline as a job-polling REST API
 review/frontend/     React dashboard: paste-JD-to-review
-data/                resume library + versioned DB schema (both gitignored)
+data/                schema.sql (tracked) + the resume library/DB themselves (gitignored, personal data)
 tests/               52 mocked regression tests, one file per module
 ```
 
