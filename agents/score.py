@@ -205,7 +205,7 @@ def score_jd(jd_parsed: dict, master_resume: dict, model: str = DEFAULT_MODEL) -
 def main():
     parser = argparse.ArgumentParser(description="Score a parsed JD against the master resume.")
     parser.add_argument("--jd-json", required=True, help="Path to jd_parsed.json, or '-' to read from stdin")
-    parser.add_argument("--resume", type=Path, default=Path("data/master_resume.yaml"), help="Path to master_resume.yaml")
+    parser.add_argument("--resume", type=Path, default=Path("data/master_resumes/main.yaml"), help="Path to a resume in data/master_resumes/")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model to use (default: {DEFAULT_MODEL})")
     args = parser.parse_args()
 

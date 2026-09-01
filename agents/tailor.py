@@ -961,7 +961,7 @@ def main():
     parser = argparse.ArgumentParser(description="Tailor the master resume to a scored JD.")
     parser.add_argument("--jd-json", required=True, help="Path to jd_parsed.json")
     parser.add_argument("--score-json", required=True, help="Path to score.json (output of score.py)")
-    parser.add_argument("--resume", type=Path, default=Path("data/master_resume.yaml"), help="Path to master_resume.yaml")
+    parser.add_argument("--resume", type=Path, default=Path("data/master_resumes/main.yaml"), help="Path to a resume in data/master_resumes/")
     parser.add_argument("--model", default=DEFAULT_MODEL, help=f"Claude model to use (default: {DEFAULT_MODEL})")
     parser.add_argument(
         "--mode", choices=MODES, default="aggressive",

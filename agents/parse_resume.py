@@ -3,8 +3,8 @@
 
 Pure function: raw resume text in, a draft master_resume.yaml-shaped
 dict out. No file writes, no DB writes -- orchestration/persistence
-(the actual write to data/master_resume.yaml) happens one layer up,
-after a human reviews and confirms the draft.
+(the actual write into data/master_resumes/<slug>.yaml) happens one
+layer up, after a human reviews and confirms the draft.
 
 This is the only way, besides hand-editing the YAML directly, that
 someone gives this tool their own resume -- so it has to work for

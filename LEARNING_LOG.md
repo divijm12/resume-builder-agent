@@ -864,9 +864,9 @@ is account-level, not send-scoped — anyone holding it could technically
 also read mail over IMAP with the same credential. It's a blunter tool.
 
 The switch happened because of a fact that mattered more than the
-security tradeoff on paper: this exact pattern already existed and
-already worked, in a different project (Teleworld Mobile Tracker's
-`GMAIL_APP_PASSWORD`, used for real price-alert emails for weeks). A
+security tradeoff on paper: this exact pattern (`GMAIL_APP_PASSWORD` +
+plain SMTP) already existed and already worked in another one of the
+author's own projects, used for real automated emails for weeks. A
 known-working, already-battle-tested setup that takes one step beats an
 unproven "more correct" setup that takes five, especially for a
 single-user local tool where both credentials live in the same

@@ -3,9 +3,8 @@
 send email. Uses plain SMTP with a Gmail "App Password" (myaccount.google.com/apppasswords,
 requires 2-Step Verification on the account) rather than OAuth2 + the
 Gmail API -- deliberately simpler setup for a single-user local tool
-(no Google Cloud project, no OAuth consent screen, no browser flow),
-same pattern already used in this user's other project (Teleworld
-Mobile Tracker's GMAIL_APP_PASSWORD). Tradeoff, stated plainly: an App
+(no Google Cloud project, no OAuth consent screen, no browser flow).
+Tradeoff, stated plainly: an App
 Password is a broader, account-level credential (SMTP/IMAP access) than
 an OAuth token scoped to `gmail.send` only -- acceptable here since it
 lives only in `.env` (gitignored) on the user's own machine, same trust
