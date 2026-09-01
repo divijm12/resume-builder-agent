@@ -108,7 +108,7 @@ render/              docx + pdf rendering, one-page layout search
 review/backend/      FastAPI: wraps the pipeline as a job-polling REST API
 review/frontend/     React dashboard: paste-JD-to-review
 data/                schema.sql (tracked) + the resume library/DB themselves (gitignored, personal data)
-tests/               52 mocked regression tests, one file per guardrail-bearing module
+tests/               54 mocked regression tests, one file per guardrail-bearing module
 ```
 
 - **`ARCHITECTURE.md`** — data model, every pipeline stage, guardrails, tech stack
@@ -132,7 +132,7 @@ Full detail in `ARCHITECTURE.md`.
 python -m pytest tests/
 ```
 
-52 tests, fully mocked, no API calls, runs in under a second. Covers every guardrail above.
+54 tests, fully mocked, no API calls, runs in under a second. Covers every guardrail above.
 
 ## Tech stack
 

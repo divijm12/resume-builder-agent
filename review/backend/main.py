@@ -86,6 +86,14 @@ app.add_middleware(
 JOBS: dict = {}
 JOBS_LOCK = threading.Lock()
 
+# A fresh clone has no applications.db (gitignored) and nothing else ever
+# applies data/schema.sql to create one -- without this, a plain page load
+# of the applications list (GET /api/applications) 500s with "no such
+# table" before a user has done anything at all. apply.ensure_schema is
+# the single source of truth (the CLI path calls it too, inside
+# run_pipeline); safe to call here since it no-ops once the table exists.
+apply.ensure_schema(DB_PATH)
+
 
 def _get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(str(DB_PATH))

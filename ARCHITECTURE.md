@@ -68,7 +68,7 @@ certifications:
 Every bullet gets an `id` and `tags`. Tailoring = **selecting, reordering, and lightly rewording** bullets to match a JD's requirements — never inventing new ones. This keeps hallucination risk near zero and makes tailoring fast/cheap (small diffs, not full regeneration). In practice, the guardrails that actually gate a reword (see Stage 2) key off exact-text matching against `skills[].name` and `projects[].tech[]`, not the per-bullet `tags` — tags are there for human scanning, not enforcement.
 
 ### `data/applications.db` (SQLite)
-Versioned in `data/schema.sql` (tracked in git — the live `.db` itself is gitignored, contains personal data). Current shape:
+Versioned in `data/schema.sql` (tracked in git — the live `.db` itself is gitignored, contains personal data). A fresh clone has no `.db` file at all; `apply.ensure_schema()` creates it from `schema.sql` the first time it's needed (checked at the top of `run_pipeline()`, and once at dashboard startup in `main.py`, so a page load of the applications list works even before a first pipeline run) — a no-op once the table already exists. Found missing via a real end-to-end run against a genuine fresh clone; see `LEARNING_LOG.md`. Current shape:
 ```sql
 applications(
   id, created_at, company, role_title, jd_raw, jd_parsed_json,
@@ -485,8 +485,11 @@ script and then discarded now has a real test alongside it instead.
   appended clause, honest-mode locking, and the distinctive-phrase
   retry-before-revert mechanism from section 3's Stage 2), `test_cover_letter.py`,
   `test_draft_outreach.py`, `test_find_contact.py`, `test_parse_resume.py`
-  (Stage -1's global numeric check), and `test_gmail_client.py` (the
-  missing-attachment-blocks-send guarantee).
+  (Stage -1's global numeric check), `test_gmail_client.py` (the
+  missing-attachment-blocks-send guarantee), and `test_apply.py`
+  (`ensure_schema` creates `applications`/`resume_versions` on a missing
+  DB and is a no-op on an existing one — see the data model section
+  above for why this exists).
 - **Convention:** when adding or changing a guardrail, add or update its
   test in the same commit rather than only verifying it with a scratch
   script and discarding the script — see `CLAUDE.md`'s Working style.

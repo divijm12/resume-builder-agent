@@ -1215,4 +1215,45 @@ your command, on your machine, and never on a real application).
 
 ---
 
+## 24. The bug that only a real fresh clone could find
+
+Every check in the open-source readiness pass up to this point was a
+document-vs-code comparison: does this doc's claim match what the code
+actually does. That method is good at catching a doc that's wrong about
+working code -- it cannot catch code that's wrong about a situation
+nobody had actually put it in yet. The gap: on this developer's own
+machine, `data/applications.db` had existed and had the schema applied
+to it since Phase 0, months ago, by a manual `sqlite3 ... < schema.sql`
+step that was never written down anywhere because it only ever needed
+doing once. Every doc, every test, every code review afterward
+implicitly assumed that db already existed, because on the only machine
+anyone had run this on, it always had.
+
+The fix for this class of bug isn't more careful reading -- it's running
+the thing somewhere the assumption isn't already secretly true. A real
+fresh clone (a temporary directory, a fresh venv, a copy of just the API
+key, nothing else carried over) hit it immediately: `GET
+/api/applications` -- the dashboard's home page, before a user does
+anything at all -- 500'd with "no such table: applications," and the CLI
+pipeline crashed at the logging step for the same reason. Neither the
+47-file line-by-line read, nor the mocked test suite (which deliberately
+never touches `data/applications.db` at all, by design -- see section 6),
+nor the mechanical claim-by-claim extraction pass a few rounds before
+this one, could have caught it, because none of them ever ran the
+software against a database that didn't already have the table in it.
+
+Fixed with `apply.ensure_schema()`: check whether the `applications`
+table exists, and if not, apply `data/schema.sql` right there -- called
+once at the top of `run_pipeline()` (covers the CLI) and once at
+`main.py` import time (covers the dashboard, including a page load
+before any pipeline has ever run). A no-op once the table exists, so it
+costs nothing on a machine that already has one, this developer's
+included. Verified by deleting the freshly-created (broken, tableless)
+`applications.db` and confirming both `GET /api/applications` and the
+full `apply.py` CLI run succeeded from that recreated-clean state --
+real files, a real one-page PDF, a real logged row -- not just a passing
+mocked assertion.
+
+---
+
 *(more entries added as this project continues)*

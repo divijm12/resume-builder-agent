@@ -46,6 +46,25 @@ from render import (
 DEFAULT_MODEL = "claude-haiku-4-5"
 
 
+def ensure_schema(db_path: Path) -> None:
+    """Create applications.db from data/schema.sql if it doesn't exist yet.
+    A fresh clone has no .db (gitignored) and nothing else ever applies the
+    schema, so every DB-touching path -- this CLI, and the dashboard's own
+    endpoints -- would fail with "no such table" otherwise. Safe to call on
+    every run: a no-op once the table already exists."""
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(db_path))
+    try:
+        exists = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='applications'"
+        ).fetchone()
+        if not exists:
+            conn.executescript((REPO_ROOT / "data" / "schema.sql").read_text())
+            conn.commit()
+    finally:
+        conn.close()
+
+
 def log_application(
     db_path: Path,
     *,
@@ -145,6 +164,7 @@ def run_pipeline(
         if progress_callback:
             progress_callback(stage)
 
+    ensure_schema(db_path)
     resume_name = resume_name or resume_path.stem
     master_resume = yaml.safe_load(resume_path.read_text())
 

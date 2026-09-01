@@ -20,7 +20,8 @@ data/
   master_resume_backups/   # gitignored -- one timestamped backup made automatically before any
                             # overwrite or delete in the library above
   schema.sql                # versioned applications.db schema (the .db itself is gitignored)
-  applications.db          # SQLite — one row per application
+  applications.db          # SQLite — one row per application; gitignored, auto-created from
+                            # schema.sql on first use (apply.ensure_schema) if missing
 agents/
   parse_resume.py          # Stage -1, always-available onboarding -- see ARCHITECTURE.md
   ingest_jd.py
