@@ -26,6 +26,7 @@ render/
 review/
   backend/
     main.py                 # FastAPI: wraps apply.py's pipeline as a REST API + job polling
+    gmail_client.py          # sends outreach email via SMTP + Gmail App Password -- see hard rule 2
   frontend/                 # React (Vite + TS + Tailwind): paste-JD-to-review web UI
 outputs/
   <company>_<role>_<date>/
@@ -38,7 +39,7 @@ outputs/
 ## Hard rules — do not violate these
 
 1. **Never fabricate resume content.** Tailoring and cover-letter agents may only select, reorder, and lightly reword bullets that already exist in `master_resume.yaml`. If a JD requirement isn't covered by any tagged bullet, surface it as a gap — do not invent a bullet or metric to cover it.
-2. **Never auto-send.** Outreach emails and application submissions always land in `review/` for manual approval. No agent calls a "send" API without an explicit user confirmation step in that run.
+2. **Never auto-send.** Outreach emails and application submissions always land in `review/` for manual approval. No agent calls a "send" API without an explicit user confirmation step in that run. In practice: `review/backend/gmail_client.py` is the only code path in the entire codebase that can send an email, it's called from exactly one endpoint (`POST /api/applications/{id}/send-outreach`), and that endpoint only fires on an explicit confirmed click in the frontend's send-confirmation modal (shows the exact recipient/subject/body before sending). No pipeline stage or agent ever calls it.
 3. **Never scrape LinkedIn profiles for contact info.** Use Hunter.io/Apollo API or direct company website sources only. Flag unverified contacts clearly — don't silently treat them as equal to verified ones. In practice this is Hunter.io only — confirmed directly against both providers' pricing pages that Apollo's free plan has no API access at all (gated behind a "Custom"/enterprise plan), while Hunter's free plan does (50 credits/month). `find_contact.py`'s `verified` field is only ever `True` when Hunter's own status is `"valid"` — never for `"accept_all"` or `"unknown"`.
 4. **Every output is versioned.** Write new files per application into `outputs/<company>_<role>_<date>/`, never overwrite a previous version. Log the application in `applications.db` immediately after generation, not after sending.
 5. **Structured in, structured out.** Every agent stage takes and returns JSON/YAML matching the schemas in `ARCHITECTURE.md`. If a stage needs to change its schema, update `ARCHITECTURE.md` in the same commit.
@@ -59,6 +60,7 @@ outputs/
 - `python agents/cover_letter.py --jd-json ... --tailored-resume-json ...` — Stage 4 alone (needs a `tailored_resume` dict, not the raw master resume)
 - `python agents/find_contact.py --company "Some Company"` — Stage 5 alone. Needs `HUNTER_API_KEY` in `.env` (free plan, 50 credits/month — sign up at hunter.io; Apollo.io is not usable here, see hard rule 3).
 - `python agents/draft_outreach.py --jd-json ... --tailored-resume-json ... --company ... [--contact-name ...] [--has-cover-letter]` — Stage 6 alone. Draft-only, never sends anything (hard rule 2).
+- Sending a drafted email (via the dashboard's "Send email" button only, see hard rule 2) needs `GMAIL_ADDRESS` and `GMAIL_APP_PASSWORD` in `.env` — enable 2-Step Verification on your Google account, generate an App Password at myaccount.google.com/apppasswords, then add both to `.env`. Nothing is hardcoded to any specific account — anyone running this repo sets up their own.
 - `python render/render.py --tailored-json ... --company ... --role ...` — Stage 3 alone
 - `cd review/backend && uvicorn main:app --reload --port 8000` — start the review API (needs `.env` at repo root). **`--reload` only watches `review/backend/` by default — it does NOT pick up edits to `agents/*.py`, `apply.py`, or `render/render.py`, since those live outside that directory.** After editing anything outside `review/backend/`, restart the uvicorn process manually (kill it and relaunch) — confirmed the hard way: a long-running server silently served pre-fix `tailor.py` code for an entire debugging session because of this. Don't assume a running dashboard reflects the latest agent/pipeline code without checking when the backend process was last started.
 - `cd review/frontend && npm run dev` — start the review web UI (http://localhost:5173), needs the backend running

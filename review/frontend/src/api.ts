@@ -78,6 +78,7 @@ export interface ApplicationDetail extends ApplicationSummary {
   contact_source: string | null;
   contact_verified: number | null;
   outreach_draft_path: string | null;
+  outreach_sent_at: string | null;
 }
 
 /** A candidate hiring contact from Hunter.io -- generic to the company
@@ -204,6 +205,20 @@ export function findContact(id: number): Promise<FindContactResult> {
 
 export function draftOutreach(id: number): Promise<OutreachDraftResult> {
   return request(`/api/applications/${id}/draft-outreach`, { method: "POST" });
+}
+
+/** Actually sends the email via the connected Gmail account -- irreversible.
+ * Sends exactly the subject/body passed in, not whatever might be on disk,
+ * so the caller must pass what's currently shown on screen. */
+export function sendOutreach(
+  id: number,
+  subject: string,
+  body_text: string,
+): Promise<{ sent: boolean; sent_at: string }> {
+  return request(`/api/applications/${id}/send-outreach`, {
+    method: "POST",
+    body: JSON.stringify({ subject, body_text }),
+  });
 }
 
 export function fileUrl(id: number, type: "pdf" | "docx" | "cover_letter_pdf" | "cover_letter_docx"): string {

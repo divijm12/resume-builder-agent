@@ -6,6 +6,7 @@ import {
   fileUrl,
   findContact,
   getApplication,
+  sendOutreach,
   updateApplication,
   type ApplicationDetail as ApplicationDetailType,
   type ContactCandidate,
@@ -141,6 +142,82 @@ function PdfPreviewModal({ url, title, onClose }: { url: string; title: string; 
   );
 }
 
+function SendConfirmModal({
+  toEmail,
+  subject,
+  bodyText,
+  validationLog,
+  sending,
+  error,
+  onCancel,
+  onConfirm,
+}: {
+  toEmail: string;
+  subject: string;
+  bodyText: string;
+  validationLog: string[];
+  sending: boolean;
+  error: string | null;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") onCancel();
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [onCancel]);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-6" onClick={onCancel}>
+      <div
+        className="flex max-h-full w-full max-w-lg flex-col overflow-hidden rounded-lg border border-[#232b3a] bg-[#10141d]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="border-b border-[#1c2431] px-5 py-3.5">
+          <span className="text-sm font-medium text-[#e4e8f0]">Send this email?</span>
+        </div>
+        <div className="overflow-y-auto px-5 py-4">
+          <div className="text-xs text-[#4a5468]">To</div>
+          <div className="mb-3 font-mono text-sm text-[#e4e8f0]">{toEmail}</div>
+          <div className="text-xs text-[#4a5468]">Subject</div>
+          <div className="mb-3 text-sm text-[#e4e8f0]">{subject}</div>
+          <div className="text-xs text-[#4a5468]">Body</div>
+          <p className="whitespace-pre-wrap text-sm text-[#9db3c9]">{bodyText}</p>
+          {validationLog.length > 0 && (
+            <div className="mt-4 rounded-md border border-[#433a1a] bg-[#2a2410] px-3 py-2.5">
+              <div className="text-xs font-medium text-[#f2c94c]">Before you send -- worth a look:</div>
+              <ul className="mt-1 space-y-1 text-xs text-[#f2c94c]">
+                {validationLog.map((line, i) => (
+                  <li key={i}>— {line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {error && <p className="mt-3 text-sm text-[#f87171]">{error}</p>}
+        </div>
+        <div className="flex items-center justify-end gap-2 border-t border-[#1c2431] px-5 py-3.5">
+          <button
+            onClick={onCancel}
+            disabled={sending}
+            className="rounded-md border border-[#232b3a] px-4 py-2 text-sm font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0] disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={sending}
+            className="rounded-md border border-[#f87171] px-4 py-2 text-sm font-medium text-[#f87171] hover:bg-[#f87171] hover:text-[#10141d] disabled:opacity-60"
+          >
+            {sending ? "Sending…" : "Confirm Send"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function ApplicationDetail() {
   const { id } = useParams<{ id: string }>();
   const [app, setApp] = useState<ApplicationDetailType | null>(null);
@@ -166,6 +243,9 @@ export default function ApplicationDetail() {
   const [outreachResult, setOutreachResult] = useState<OutreachDraftResult | null>(null);
   const [outreachError, setOutreachError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showSendConfirm, setShowSendConfirm] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -254,6 +334,21 @@ export default function ApplicationDetail() {
     if (!outreachResult) return;
     await navigator.clipboard.writeText(`Subject: ${outreachResult.subject}\n\n${outreachResult.body_text}`);
     setCopied(true);
+  }
+
+  async function handleConfirmSend() {
+    if (!app || !outreachResult) return;
+    setSending(true);
+    setSendError(null);
+    try {
+      const result = await sendOutreach(app.id, outreachResult.subject, outreachResult.body_text);
+      setApp({ ...app, outreach_sent_at: result.sent_at, status: "outreach_sent" });
+      setShowSendConfirm(false);
+    } catch (err) {
+      setSendError(err instanceof Error ? err.message : "Failed to send email");
+    } finally {
+      setSending(false);
+    }
   }
 
   if (error)
@@ -434,9 +529,15 @@ export default function ApplicationDetail() {
 
       <Section title="Outreach draft">
         <p className="mb-3 text-[11px] text-[#4a5468]">
-          A short, hand-editable email draft — never sent automatically. Copy it, edit it, and send it yourself.
+          A short, hand-editable email draft. Copy it and send it yourself, or send it directly from here once
+          you've saved a contact — every send requires an explicit confirmation with the exact text shown first.
         </p>
         {outreachError && <p className="mb-3 text-sm text-[#f87171]">{outreachError}</p>}
+        {app.outreach_sent_at && (
+          <p className="mb-3 text-sm text-[#4ade80]">
+            Sent to {app.contact_email} on {new Date(app.outreach_sent_at).toLocaleString()}
+          </p>
+        )}
         {outreachResult && (
           <div className="mb-3 space-y-3 rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
             <div>
@@ -447,12 +548,24 @@ export default function ApplicationDetail() {
               <span className="text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">Body</span>
               <p className="mt-0.5 whitespace-pre-wrap text-sm text-[#9db3c9]">{outreachResult.body_text}</p>
             </div>
-            <button
-              onClick={handleCopyOutreach}
-              className="rounded-md border border-[#232b3a] px-3 py-1.5 text-xs font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
-            >
-              {copied ? "Copied" : "Copy"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleCopyOutreach}
+                className="rounded-md border border-[#232b3a] px-3 py-1.5 text-xs font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+              {app.contact_email ? (
+                <button
+                  onClick={() => setShowSendConfirm(true)}
+                  className="rounded-md border border-[#232b3a] px-3 py-1.5 text-xs font-medium text-[#e4e8f0] hover:border-[#4fd6f0] hover:text-[#4fd6f0]"
+                >
+                  {app.outreach_sent_at ? "Send again" : "Send email"}
+                </button>
+              ) : (
+                <span className="text-xs text-[#4a5468]">Find and save a contact first to enable sending</span>
+              )}
+            </div>
             {outreachResult.validation_log.length > 0 && (
               <details>
                 <summary className="cursor-pointer text-sm text-[#6b7690] hover:text-[#e4e8f0]">
@@ -479,6 +592,22 @@ export default function ApplicationDetail() {
           {drafting ? "Drafting…" : outreachResult ? "Regenerate" : "Draft outreach email"}
         </button>
       </Section>
+
+      {showSendConfirm && outreachResult && app.contact_email && (
+        <SendConfirmModal
+          toEmail={app.contact_email}
+          subject={outreachResult.subject}
+          bodyText={outreachResult.body_text}
+          validationLog={outreachResult.validation_log}
+          sending={sending}
+          error={sendError}
+          onCancel={() => {
+            setShowSendConfirm(false);
+            setSendError(null);
+          }}
+          onConfirm={handleConfirmSend}
+        />
+      )}
 
       {tr && (
         <>

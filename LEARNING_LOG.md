@@ -831,4 +831,72 @@ quiet when it should, not only that it fires when it should.
 
 ---
 
+## 17. Two ways to send an email, and why "it works" isn't the deciding factor
+
+The last piece of Phase 5 was a real send button — the first thing this
+project ever built that performs an action with a real-world side effect
+outside the tool itself. Before writing any code, it was worth stating
+plainly why this feels different from everything before it: a fabricated
+resume bullet is invisible until someone reads a docx; a bad outreach
+send has already gone to a real recruiter the moment "send" returns 200.
+There's no revert.
+
+There are two genuinely different ways to let code send email as you,
+and this project ended up trying both in sequence, which is a good side
+by side comparison to keep:
+
+**OAuth2 + the Gmail API** (built first, then replaced). Requires a
+Google Cloud project, enabling the Gmail API, an OAuth consent screen,
+a Desktop OAuth client, and a one-time browser-based consent flow that
+produces a token. The upside is real and specific: the token can be
+scoped to `gmail.send` only, meaning even if it leaked, the most it
+could ever do is send mail as you — it cannot read, search, or delete
+anything in the inbox. This is Google's own recommended pattern for a
+third-party app acting on someone else's mailbox, and it's the more
+"correct" choice on paper.
+
+**SMTP + a Gmail App Password** (what shipped). A 16-character password
+generated once at myaccount.google.com/apppasswords (requires 2-Step
+Verification), dropped into `.env`. No Google Cloud project, no consent
+screen, no browser flow — just `smtplib.SMTP("smtp.gmail.com", 587)`,
+`login()`, `send_message()`. The tradeoff is real too: an App Password
+is account-level, not send-scoped — anyone holding it could technically
+also read mail over IMAP with the same credential. It's a blunter tool.
+
+The switch happened because of a fact that mattered more than the
+security tradeoff on paper: this exact pattern already existed and
+already worked, in a different project (Teleworld Mobile Tracker's
+`GMAIL_APP_PASSWORD`, used for real price-alert emails for weeks). A
+known-working, already-battle-tested setup that takes one step beats an
+unproven "more correct" setup that takes five, especially for a
+single-user local tool where both credentials live in the same
+`.env`/gitignore trust boundary either way — the OAuth token wasn't
+protecting against a threat model this project actually has (a
+multi-tenant server, a published app other people log into); it was
+solving for a threat model (a leaked long-lived credential granting
+broad account access) that matters much more to a hosted product than a
+personal script on one machine.
+
+**The one requirement that didn't move regardless of which mechanism won:**
+nothing about either approach can be hardcoded if this project is ever
+open-sourced — every credential (App Password, OAuth token, whichever)
+has to be something each person generates for their own account and
+drops into their own gitignored `.env` or `token.json`, with the shared
+code containing zero trace of any specific person's account. Both
+designs satisfy this equally; it was worth stating explicitly and
+re-checking before writing a line of code, not assumed, since "works for
+me" and "safe to hand to someone else" are different bars and it's easy
+to accidentally build only the first one.
+
+The actual code enforcing hard rule 2 ("never auto-send") didn't change
+between the two designs either: exactly one function
+(`gmail_client.send_email`) can call out to an email server, it's called
+from exactly one FastAPI endpoint, and that endpoint only fires from a
+frontend confirmation modal that shows the literal final text before the
+click. That boundary is what makes "never auto-send" a guarantee instead
+of a hope — and it's independent of which credential mechanism sits
+behind it.
+
+---
+
 *(more entries added as this project continues)*

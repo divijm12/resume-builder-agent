@@ -32,6 +32,7 @@ load_dotenv(REPO_ROOT / ".env")
 import apply  # noqa: E402  (must follow sys.path insert)
 import find_contact  # noqa: E402  (agents/ is on sys.path via apply's own import above)
 import draft_outreach  # noqa: E402  (agents/ is on sys.path via apply's own import above)
+import gmail_client  # noqa: E402  (same directory as this file)
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -258,6 +259,58 @@ def draft_application_outreach(app_id: int):
         "validation_log": result["validation_log"],
         "draft_path": str(draft_path),
     }
+
+
+class SendOutreachRequest(BaseModel):
+    subject: str
+    body_text: str
+
+
+@app.post("/api/applications/{app_id}/send-outreach")
+def send_application_outreach(app_id: int, body: SendOutreachRequest):
+    """Actually send the outreach email via the connected Gmail account
+    (gmail_client.py). THIS IS THE ONLY CODE PATH IN THE ENTIRE CODEBASE
+    THAT CAN CALL gmail_client.send_email -- no pipeline stage, no agent,
+    nothing in apply.py touches it. It only fires on an explicit POST from
+    a confirmed frontend click (CLAUDE.md hard rule 2's "explicit user
+    confirmation step").
+
+    Sends exactly `subject`/`body_text` as given -- whatever the frontend
+    currently has on screen -- never re-read from outreach_draft.md, so
+    there's no chance of sending something other than what was just
+    reviewed in the confirmation modal."""
+    conn = _get_db()
+    try:
+        row = conn.execute("SELECT contact_email FROM applications WHERE id = ?", (app_id,)).fetchone()
+    finally:
+        conn.close()
+    if row is None:
+        raise HTTPException(404, "application not found")
+    if not row["contact_email"]:
+        raise HTTPException(400, "no contact email saved for this application -- find and save a contact first")
+
+    try:
+        gmail_client.send_email(row["contact_email"], body.subject, body.body_text)
+    except RuntimeError as e:
+        raise HTTPException(400, str(e))
+    except Exception as e:
+        raise HTTPException(502, f"Gmail send failed: {e}")
+
+    sent_at = None
+    conn = _get_db()
+    try:
+        conn.execute(
+            "UPDATE applications SET outreach_sent_at = datetime('now'), status = 'outreach_sent' WHERE id = ?",
+            (app_id,),
+        )
+        conn.commit()
+        sent_at = conn.execute(
+            "SELECT outreach_sent_at FROM applications WHERE id = ?", (app_id,)
+        ).fetchone()["outreach_sent_at"]
+    finally:
+        conn.close()
+
+    return {"sent": True, "sent_at": sent_at}
 
 
 class UpdateApplicationRequest(BaseModel):
