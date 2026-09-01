@@ -1100,4 +1100,64 @@ data were never at risk throughout.
 
 ---
 
+## 22. When a guardrail's own detection logic needs a guardrail
+
+Building the distinctive-detail check surfaced a bug in the check
+itself, caught by the very first mocked test written for it, before any
+real API call. The design was: extract a run of specific-sounding words
+from the original bullet, and flag it if the reword drops it. The first
+version called a phrase "kept" if even one word from it survived. On the
+real turfgrass example, that rule failed silently: the distinctive run
+extracted was actually "turfgrass disease outbreak research project"
+(five words, since "research" and "project" aren't stopwords either) --
+and the bad reword still contained "research project." One surviving
+word out of five was enough to call the whole phrase "kept," even though
+the two words that actually mattered (turfgrass, disease outbreak) were
+gone. The fix was requiring a majority of a phrase's words to survive,
+not just one.
+
+Worth naming why this matters beyond "the test caught a bug, which is
+what tests are for": the fix reveals something about the underlying
+problem. A "distinctive phrase" isn't uniformly distinctive across all
+its words -- it's often a specific detail glued onto a generic
+continuation ("turfgrass disease outbreak" + "research project"), and a
+survival rule needs to weigh the whole phrase, not treat every word as
+equally worth protecting. This is a smaller-scale version of the exact
+thing the guardrail exists to catch in bullets themselves: a check that
+only verifies *something* is present, without weighing *how much* of the
+original substance that something represents, can pass on a technicality.
+
+**The other real design decision, made explicitly rather than reused
+from what already existed:** every other guardrail in this file reverts
+immediately on a violation, because they're all near-exact matches with
+effectively zero false positives -- a number is either in the original
+or it isn't. This new check is a structural heuristic and provably isn't
+that precise (the same test suite that confirmed it catches the real
+turfgrass case also confirmed, on a second constructed example, that it
+flags a completely harmless paraphrase). Reverting immediately on a
+heuristic with real false positives would mean tailoring silently
+rewords less often than intended, every time the heuristic is wrong, not
+just when it's right -- the user's explicit objection when this was
+proposed. The fix wasn't to make the heuristic perfect (it can't be,
+without an LLM judging semantics, which this project has independently
+avoided elsewhere for the same reasons a different feature's "iterate
+until an error goes away" idea was rejected days earlier) -- it was to
+give the *response* a middle step: one targeted, bounded retry, re-checked
+against the full guardrail suite (not just the one check that fired,
+since a fresh generation can introduce a different problem entirely),
+before falling back to the same hard revert every other guardrail
+already uses.
+
+**Verification order held to the same discipline as always**, just with
+one new step: a *retroactive* check against real historical data,
+requiring no API call and no synthetic content at all -- every bullet
+genuinely reworded across the two real logged applications (9 total)
+was run through the new detector before trusting its threshold, and it
+stayed correctly silent on all nine. That's a stronger form of "test
+before spending real money" than usual: it used data that was already
+sitting there from work already paid for, rather than generating new
+synthetic examples to check against.
+
+---
+
 *(more entries added as this project continues)*

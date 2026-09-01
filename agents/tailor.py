@@ -53,6 +53,19 @@ text instead of actually rewording it -- prompt-only enforcement of this
 didn't hold reliably across runs, so it's now caught structurally (new text
 == original text + a trailing --/em-dash clause).
 
+Also rejected, with a twist: a reword that drops a "distinctive phrase" --
+a specific domain detail not in the skills/tech vocabulary above (e.g.
+"a turfgrass disease outbreak research project" reworded down to just "a
+research project" -- factually fine, but deletes what made the work
+distinctive; the prompt already explicitly bans this with this exact
+example and it still isn't reliable, hence the code check). Unlike the
+other checks above, this one is a structural heuristic with real false
+positives (it will also flag some harmless paraphrasing), so it does NOT
+revert immediately -- validate_and_build makes one targeted retry call
+asking the model to restore just that detail, and only reverts if the
+retry still fails. This is the one place validate_and_build is not a
+fully pure function (only when given a client -- see its own docstring).
+
 Hard rule (user-specified, non-negotiable): tailoring must never leave the
 candidate scoring lower than doing nothing. After rescoring, if
 score_after < score_before, every choice this pass made is discarded and
@@ -333,6 +346,57 @@ def _has_appended_clause(original: str, new_text: str) -> bool:
     return remainder.startswith("--") or remainder.startswith("—") or remainder.startswith("-")
 
 
+_STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "for", "by", "of", "to", "in", "on",
+    "at", "as", "with", "using", "from", "into", "across", "that", "this",
+    "these", "those", "is", "was", "were", "be", "been", "being", "it", "its",
+    "their", "his", "her", "our", "your", "my", "which", "who", "whom",
+}
+_WORD_RE = re.compile(r"[a-zA-Z][a-zA-Z0-9+#.\-]*")
+
+
+def _distinctive_phrases(text: str, min_words: int = 3) -> List[str]:
+    """Runs of `min_words`+ consecutive non-stopword words -- candidate
+    'distinctive' phrases worth checking for survival after a reword.
+    Purely structural (word membership + stopword filtering), no semantic
+    judgment -- see _dropped_phrases and the module docstring for the
+    accepted false-positive tradeoff this implies (it will also flag some
+    harmless paraphrasing, not just genuine genericization)."""
+    words = _WORD_RE.findall(text)
+    phrases = []
+    current_run: List[str] = []
+    for w in words:
+        if w.lower() in _STOPWORDS:
+            if len(current_run) >= min_words:
+                phrases.append(" ".join(current_run))
+            current_run = []
+        else:
+            current_run.append(w)
+    if len(current_run) >= min_words:
+        phrases.append(" ".join(current_run))
+    return phrases
+
+
+def _dropped_phrases(original: str, new_text: str, min_words: int = 3) -> List[str]:
+    """Distinctive phrases from `original` (see _distinctive_phrases) that
+    mostly disappeared from `new_text`. A phrase counts as 'surviving' only
+    if AT LEAST HALF its words still appear (via the same whole-word
+    _contains_term matcher used for named tech terms) -- not just any
+    single word. A run like "turfgrass disease outbreak research project"
+    bundles a specific detail (turfgrass disease outbreak) with generic
+    trailing words (research project); if only the generic tail survives a
+    reword, a single-word-survival rule would wrongly call that "kept."
+    Requiring a majority catches that while still tolerating a reword that
+    drops one word of a longer phrase but keeps its substance."""
+    dropped = []
+    for phrase in _distinctive_phrases(original, min_words=min_words):
+        words = phrase.split()
+        surviving = sum(1 for w in words if _contains_term(new_text, w))
+        if surviving < len(words) / 2:
+            dropped.append(phrase)
+    return dropped
+
+
 def _known_terms(master_resume: dict) -> set:
     """All skill names and every project's tech names, globally (not scoped to a
     single project or bullet) -- protects a term from being dropped out of any
@@ -357,17 +421,119 @@ def _bullet_lookup(master_resume: dict) -> dict:
     return lookup
 
 
-def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive") -> dict:
+# Violation kinds that always mean "revert immediately, no retry" -- these
+# are near-exact-match checks (a number, or a name from an explicit
+# vocabulary) with ~zero false positives, unlike "dropped_phrase" below.
+_HARD_VIOLATION_KINDS = {"numeric", "appended_clause", "dropped_term", "added_term"}
+
+# Cheap safety cap on worst-case added cost/latency if _dropped_phrases
+# fires more than expected on some resume -- past this many retry attempts
+# in one tailor_resume() call, remaining flagged bullets just revert
+# immediately (same as the no-client path below), rather than attempting
+# an unbounded number of extra API calls.
+MAX_RETRIES_PER_RUN = 5
+
+
+def _check_bullet(original: str, new_text: str, known_terms: set, min_words: int = 3) -> List[dict]:
+    """Every guardrail check for one reworded bullet, in one place -- used
+    both for the first pass over a fresh reword and to re-check a retry's
+    output, so there's one source of truth for "is this reword clean"
+    rather than two copies that can drift. Returns a list of violation
+    dicts (empty = clean); see _HARD_VIOLATION_KINDS for which kinds mean
+    an immediate revert vs. a retry-eligible "dropped_phrase" kind."""
+    violations = []
+    if _numeric_tokens(new_text) - _numeric_tokens(original):
+        violations.append({"kind": "numeric"})
+    if _has_appended_clause(original, new_text):
+        violations.append({"kind": "appended_clause"})
+    dropped_terms = [t for t in known_terms if _contains_term(original, t) and not _contains_term(new_text, t)]
+    if dropped_terms:
+        violations.append({"kind": "dropped_term", "terms": dropped_terms})
+    added_terms = [
+        t for t in known_terms
+        if _contains_term(new_text, t) and not _contains_term(original, t) and not _is_expansion(t, original)
+    ]
+    if added_terms:
+        violations.append({"kind": "added_term", "terms": added_terms})
+    dropped_phrases = _dropped_phrases(original, new_text, min_words=min_words)
+    if dropped_phrases:
+        violations.append({"kind": "dropped_phrase", "phrases": dropped_phrases})
+    return violations
+
+
+class BulletRetryResult(BaseModel):
+    text: str
+
+
+def _attempt_bullet_retry(
+    client: "anthropic.Anthropic", model: str, original: str, rejected_reword: str, dropped_phrases: List[str]
+) -> Optional[str]:
+    """One targeted retry for a single bullet whose reword dropped a
+    distinctive detail (not a number or a known tech/skill term -- those
+    guardrails still revert immediately, no retry, since they have ~zero
+    false positives; this path exists specifically because the
+    distinctive-phrase check does not). Returns the retried text, or None
+    if the API call itself failed -- the caller treats None the same as
+    "still bad" and reverts."""
+    try:
+        response = client.messages.parse(
+            model=model,
+            max_tokens=512,
+            system=(
+                "You previously reworded one resume bullet for a job application, but the "
+                "rewording dropped a specific, meaningful detail from the original. Rewrite "
+                "it once more: keep your tailoring intent and phrasing style, but make sure "
+                "the missing detail (or a clear equivalent) is present. Do not add any new "
+                "number, tool, or claim that wasn't already in the original bullet. Return "
+                "only the corrected bullet text, nothing else."
+            ),
+            messages=[{
+                "role": "user",
+                "content": (
+                    f"Original bullet: {original}\n\n"
+                    f"Your previous rewording: {rejected_reword}\n\n"
+                    f"Specific detail that was lost: {', '.join(dropped_phrases)}\n\n"
+                    f"Rewrite the bullet once more, restoring this detail."
+                ),
+            }],
+            output_format=BulletRetryResult,
+        )
+        return response.parsed_output.text
+    except Exception:
+        return None
+
+
+def validate_and_build(
+    plan: dict,
+    master_resume: dict,
+    mode: str = "aggressive",
+    client: Optional["anthropic.Anthropic"] = None,
+    retry_model: Optional[str] = None,
+) -> dict:
     """Enforce the no-fabrication hard rule and assemble the final tailored resume.
 
     An unknown bullet/skill/experience id is dropped; a reworded bullet that
-    introduces a number not present in the original is reverted to the
-    original text. Every rejection is recorded in validation_log so it's
-    visible in review, not silently swallowed.
+    introduces a number not present in the original, drops/adds a named
+    tech term, or staples an appended clause is reverted to the original
+    text. Every rejection is recorded in validation_log so it's visible in
+    review, not silently swallowed.
 
     In "honest" mode, bullet text is locked to the master resume's original
     wording in code -- not just prompted -- so that guarantee holds
     regardless of what the model returns in a bullet's 'text' field.
+
+    NOT a fully pure function when `client` is given: if a reworded bullet
+    drops a "distinctive phrase" (see _dropped_phrases) without tripping
+    any of the near-exact-match checks above, this makes one targeted
+    retry call asking the model to restore just that detail, before
+    falling back to a hard revert -- a heuristic check has real false
+    positives, so immediately reverting on every hit would make tailoring
+    reword noticeably less often than intended (this exact tradeoff was
+    an explicit user design call, not an oversight). Capped at
+    MAX_RETRIES_PER_RUN retry calls per invocation. Pass client=None (the
+    default) to skip this entirely and revert immediately instead --
+    keeps this function fully deterministic for callers/tests that don't
+    want or need the extra API call.
     """
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}, got {mode!r}")
@@ -394,6 +560,33 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
     # the id-specific fix, the same lesson as _has_appended_clause: catch the
     # shape in code, don't just ask nicely.
     reverted_parents: set = set()
+    retries_used = [0]  # mutable counter shared across the whole call, capped at MAX_RETRIES_PER_RUN
+
+    def _log_hard_violations(bullet_id: str, violations: List[dict]) -> None:
+        for v in violations:
+            if v["kind"] == "numeric":
+                warnings.append(
+                    f"Reworded text for bullet '{bullet_id}' introduced a number not in "
+                    f"the original -- reverted to original text."
+                )
+            elif v["kind"] == "appended_clause":
+                warnings.append(
+                    f"Reworded text for bullet '{bullet_id}' stapled a 'demonstrating X' "
+                    f"style clause onto the end instead of actually rewording -- reverted "
+                    f"to original text."
+                )
+            elif v["kind"] == "dropped_term":
+                warnings.append(
+                    f"Reworded text for bullet '{bullet_id}' dropped named "
+                    f"technology/vendor term(s) {v['terms']} present in the original -- "
+                    f"reverted to original text."
+                )
+            elif v["kind"] == "added_term":
+                warnings.append(
+                    f"Reworded text for bullet '{bullet_id}' added named "
+                    f"technology/skill term(s) {v['terms']} not present (or expanded) in "
+                    f"the original -- reverted to original text."
+                )
 
     def resolve_bullets(selected_bullets, valid_ids_for_parent, parent_label):
         resolved = []
@@ -407,46 +600,46 @@ def validate_and_build(plan: dict, master_resume: dict, mode: str = "aggressive"
             # against both directions, for every bullet -- experience included, not
             # just project bullets. A term only "counts" as dropped if it's an exact
             # word/phrase match in the original, so unrelated prose can't false-positive.
-            dropped_terms = [
-                t for t in known_terms
-                if _contains_term(original, t) and not _contains_term(new_text, t)
-            ]
-            added_terms = [
-                t for t in known_terms
-                if _contains_term(new_text, t) and not _contains_term(original, t)
-                and not _is_expansion(t, original)
-            ]
-            if _numeric_tokens(new_text) - _numeric_tokens(original):
-                warnings.append(
-                    f"Reworded text for bullet '{sb['id']}' introduced a number not in "
-                    f"the original -- reverted to original text."
-                )
+            violations = _check_bullet(original, new_text, known_terms)
+            hard_violations = [v for v in violations if v["kind"] in _HARD_VIOLATION_KINDS]
+            phrase_violations = [v for v in violations if v["kind"] == "dropped_phrase"]
+
+            if hard_violations:
+                _log_hard_violations(sb["id"], hard_violations)
                 reverted_parents.add(parent_label)
                 resolved.append({"id": sb["id"], "text": original})
-            elif _has_appended_clause(original, new_text):
-                warnings.append(
-                    f"Reworded text for bullet '{sb['id']}' stapled a 'demonstrating X' "
-                    f"style clause onto the end instead of actually rewording -- reverted "
-                    f"to original text."
-                )
-                reverted_parents.add(parent_label)
-                resolved.append({"id": sb["id"], "text": original})
-            elif dropped_terms:
-                warnings.append(
-                    f"Reworded text for bullet '{sb['id']}' dropped named "
-                    f"technology/vendor term(s) {dropped_terms} present in the original -- "
-                    f"reverted to original text."
-                )
-                reverted_parents.add(parent_label)
-                resolved.append({"id": sb["id"], "text": original})
-            elif added_terms:
-                warnings.append(
-                    f"Reworded text for bullet '{sb['id']}' added named "
-                    f"technology/skill term(s) {added_terms} not present (or expanded) in "
-                    f"the original -- reverted to original text."
-                )
-                reverted_parents.add(parent_label)
-                resolved.append({"id": sb["id"], "text": original})
+            elif phrase_violations:
+                dropped = phrase_violations[0]["phrases"]
+                final_text = original
+                if client is not None and retries_used[0] < MAX_RETRIES_PER_RUN:
+                    retries_used[0] += 1
+                    retry_text = _attempt_bullet_retry(client, retry_model, original, new_text, dropped)
+                    if retry_text is not None and not _check_bullet(original, retry_text, known_terms):
+                        final_text = retry_text
+                        warnings.append(
+                            f"Reworded text for bullet '{sb['id']}' dropped distinctive "
+                            f"detail {dropped} present in the original -- retried once, "
+                            f"correction accepted."
+                        )
+                    else:
+                        warnings.append(
+                            f"Reworded text for bullet '{sb['id']}' dropped distinctive "
+                            f"detail {dropped} present in the original -- retried once but "
+                            f"the correction still had issues, reverted to original text."
+                        )
+                else:
+                    reason = "no client provided" if client is None else "per-run retry cap reached"
+                    warnings.append(
+                        f"Reworded text for bullet '{sb['id']}' dropped distinctive "
+                        f"detail {dropped} present in the original -- no retry attempted "
+                        f"({reason}), reverted to original text."
+                    )
+                if final_text != original:
+                    actually_reworded_ids.append(sb["id"])
+                    reworded_by_parent[parent_label] = reworded_by_parent.get(parent_label, 0) + 1
+                else:
+                    reverted_parents.add(parent_label)
+                resolved.append({"id": sb["id"], "text": final_text})
             else:
                 if new_text != original:
                     actually_reworded_ids.append(sb["id"])
@@ -709,7 +902,11 @@ def tailor_resume(
         output_format=TailoringPlan,
     )
     plan = response.parsed_output.model_dump()
-    result = validate_and_build(plan, master_resume, mode=mode)
+    # client/model passed through so a dropped-distinctive-detail reword gets
+    # one targeted retry before reverting -- see validate_and_build's own
+    # docstring for why this is the one deliberate exception to it otherwise
+    # being a pure function.
+    result = validate_and_build(plan, master_resume, mode=mode, client=client, retry_model=model)
 
     # Rescore the tailored resume with score.py's own scoring logic so the impact
     # of tailoring (or lack of it) is measured, not assumed. Deliberately NOT
