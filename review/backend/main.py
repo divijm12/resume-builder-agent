@@ -296,19 +296,39 @@ def send_application_outreach(app_id: int, body: SendOutreachRequest):
     Sends exactly `subject`/`body_text` as given -- whatever the frontend
     currently has on screen -- never re-read from outreach_draft.md, so
     there's no chance of sending something other than what was just
-    reviewed in the confirmation modal."""
+    reviewed in the confirmation modal.
+
+    Always attaches the resume PDF; also attaches the cover letter PDF if
+    one was generated for this application. The draft text tells the
+    recipient a resume (and cover letter, if applicable) is attached, so
+    this makes that literally true rather than just asserted -- a missing
+    file is a hard error (see gmail_client.send_email), not a silent gap."""
     conn = _get_db()
     try:
-        row = conn.execute("SELECT contact_email FROM applications WHERE id = ?", (app_id,)).fetchone()
+        row = conn.execute(
+            "SELECT contact_email, resume_variant_path, cover_letter_path FROM applications WHERE id = ?",
+            (app_id,),
+        ).fetchone()
     finally:
         conn.close()
     if row is None:
         raise HTTPException(404, "application not found")
     if not row["contact_email"]:
         raise HTTPException(400, "no contact email saved for this application -- find and save a contact first")
+    if not row["resume_variant_path"]:
+        raise HTTPException(404, "no resume generated for this application yet")
+
+    def _resolve_pdf(stored_path_str: str) -> Path:
+        stored_path = Path(stored_path_str)
+        docx_path = stored_path if stored_path.is_absolute() else REPO_ROOT / stored_path
+        return docx_path.with_suffix(".pdf")
+
+    attachment_paths = [_resolve_pdf(row["resume_variant_path"])]
+    if row["cover_letter_path"]:
+        attachment_paths.append(_resolve_pdf(row["cover_letter_path"]))
 
     try:
-        gmail_client.send_email(row["contact_email"], body.subject, body.body_text)
+        gmail_client.send_email(row["contact_email"], body.subject, body.body_text, attachment_paths=attachment_paths)
     except RuntimeError as e:
         raise HTTPException(400, str(e))
     except Exception as e:

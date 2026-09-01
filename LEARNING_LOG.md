@@ -949,4 +949,37 @@ regenerating and hoping. Now there is.
 
 ---
 
+## 19. The email said "attached" and nothing was
+
+Right after the send button shipped, a gap surfaced that's worth naming
+plainly: every draft's own text said "my resume is attached" (and "a
+cover letter too" when one existed), and the send endpoint sent exactly
+that text with zero actual attachments. The email wasn't wrong to write
+-- it's what a normal outreach email says -- but the code hadn't caught
+up to make that sentence true. Nothing in this project's guardrail
+machinery would have caught this either: the fabrication checks only
+look at claims about the *candidate's history*, not at whether the
+email's own stated behavior (an attachment) actually happens.
+
+The fix is a real hard requirement, not a soft flag like most of this
+project's other checks: `gmail_client.send_email()` now treats a missing
+attachment file as an error that stops the send entirely, rather than
+letting an email go out that claims something false. This is a
+deliberate departure from the "soft flag, let a human decide" pattern
+used everywhere else in Stage 6 (length, JD-relevance, formatting) --
+those are judgment calls where a human's read might reasonably differ
+from the check; "does this file exist on disk" isn't a judgment call,
+it's a fact, so it gets a hard stop instead of a warning.
+
+Verified in the same two-step order as every other feature here: a
+mocked test first (both files present, only one present, a missing one
+raises and confirms *nothing* got sent, no attachments at all still
+works) before spending anything real, then one live self-test send using
+the actual PDF files from a real application (Jobright's resume + cover
+letter) to a synthetic contact pointed at the user's own inbox --
+confirmed both files arrived and opened correctly, and the real
+Snowflake/Jobright rows were untouched throughout.
+
+---
+
 *(more entries added as this project continues)*

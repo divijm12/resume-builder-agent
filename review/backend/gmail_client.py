@@ -23,9 +23,12 @@ App Password at myaccount.google.com/apppasswords, then add to .env:
     GMAIL_APP_PASSWORD=xxxxxxxxxxxxxxxx
 """
 
+import mimetypes
 import os
 import smtplib
 from email.message import EmailMessage
+from pathlib import Path
+from typing import List, Optional
 
 from dotenv import load_dotenv
 
@@ -38,10 +41,18 @@ SMTP_HOST = "smtp.gmail.com"
 SMTP_PORT = 587
 
 
-def send_email(to_email: str, subject: str, body_text: str) -> dict:
-    """Send one email via Gmail's SMTP server. Raises a clear, actionable
-    RuntimeError if the account isn't configured -- never a bare
-    connection/auth stack trace."""
+def send_email(
+    to_email: str,
+    subject: str,
+    body_text: str,
+    attachment_paths: Optional[List[Path]] = None,
+) -> dict:
+    """Send one email via Gmail's SMTP server, with real file attachments
+    (resume, cover letter). Raises a clear, actionable RuntimeError if the
+    account isn't configured, or if a given attachment path doesn't exist
+    on disk -- if the email's own text says "my resume is attached," it
+    actually has to be, so a missing file is a hard error here, not a
+    silently-sent email that lied."""
     if not GMAIL_ADDRESS or not GMAIL_APP_PASSWORD:
         raise RuntimeError(
             "Gmail not connected -- set GMAIL_ADDRESS and GMAIL_APP_PASSWORD in .env "
@@ -54,6 +65,13 @@ def send_email(to_email: str, subject: str, body_text: str) -> dict:
     message["To"] = to_email
     message["From"] = GMAIL_ADDRESS
     message["Subject"] = subject
+
+    for path in attachment_paths or []:
+        if not path.exists():
+            raise RuntimeError(f"Attachment not found on disk: {path}")
+        mime_type, _ = mimetypes.guess_type(str(path))
+        maintype, subtype = (mime_type.split("/", 1) if mime_type else ("application", "octet-stream"))
+        message.add_attachment(path.read_bytes(), maintype=maintype, subtype=subtype, filename=path.name)
 
     with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
         server.starttls()
