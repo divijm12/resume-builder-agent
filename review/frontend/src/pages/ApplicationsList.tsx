@@ -53,6 +53,7 @@ export default function ApplicationsList() {
                 <th className="px-5 py-3 font-medium">Role</th>
                 <th className="px-5 py-3 font-medium">Date</th>
                 <th className="px-5 py-3 font-medium">Score</th>
+                <th className="px-5 py-3 font-medium">Resume</th>
                 <th className="px-5 py-3 font-medium">Mode</th>
                 <th className="px-5 py-3 font-medium">Status</th>
               </tr>
@@ -72,6 +73,7 @@ export default function ApplicationsList() {
                     <td className="px-5 py-3.5 font-mono font-semibold text-[#e4e8f0]">
                       {app.match_score !== null ? `${app.match_score.toFixed(0)}%` : "—"}
                     </td>
+                    <td className="px-5 py-3.5 text-[#6b7690]">{app.resume_name ?? "—"}</td>
                     <td className="px-5 py-3.5 capitalize text-[#6b7690]">{app.mode}</td>
                     <td className="px-5 py-3.5">
                       <span

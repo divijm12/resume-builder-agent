@@ -11,6 +11,13 @@ CREATE TABLE applications (
   jd_parsed_json TEXT,
   match_score REAL,
   resume_variant_path TEXT,
+  -- Human-readable label of whichever named resume (data/master_resumes/)
+  -- was used to score/tailor this application -- e.g. "Main Resume",
+  -- "Data-focused". A plain string snapshot, not a foreign key, so it
+  -- stays meaningful even if that named resume is later edited or
+  -- deleted from the library. NULL for applications logged before this
+  -- library existed (a single implicit resume, no name to record).
+  resume_name TEXT,
   cover_letter_path TEXT,
   -- Full tailor.py output (tailored_resume, diff_summary, validation_log,
   -- unaddressed_*, ats_scan_notes, score_before, score_after,

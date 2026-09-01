@@ -1040,4 +1040,64 @@ for a real application.
 
 ---
 
+## 21. A feature that reveals its own next requirement by being used
+
+The upload feature from the previous session was tested for real the
+same day it shipped -- with a second real resume, belonging to a real
+person (a friend, with consent, used for testing). That single test run
+immediately exposed the exact gap the design hadn't accounted for:
+uploading a new resume just overwrote the old one. There was no way to
+keep both, and no way for a past application to say which one it had
+used. The fix wasn't a bug fix -- the upload feature worked exactly as
+designed -- it revealed that the design's assumption (one resume, ever)
+was too narrow the moment a second real resume existed.
+
+This is worth naming as a pattern: some gaps only become visible through
+real use, not through more design review beforehand. The first version
+of "let a user give the system their resume" was scoped correctly for
+"a resume" (singular) because that was the only case discussed. The
+moment a real second case showed up, the singular design was
+retroactively wrong, not because anyone missed something obvious, but
+because the requirement genuinely didn't exist until someone did the
+thing that created it.
+
+**A real safety moment, not just a design one:** before touching
+anything, `git status` showed the live `master_resume.yaml` held a
+completely different person's real PII than what was committed. Rather
+than assume it was a mistake and quietly restore the "correct" data (or
+assume it was intentional and build straight through it), the right move
+was to stop and ask -- both what should happen to that specific data,
+and what actually happened, before writing any code that would move or
+duplicate it. It turned out to be exactly the intentional test that
+motivated this whole feature request, but a second real person's PII
+sitting uncommitted in a repo isn't something to guess about.
+
+**Design choice made along the way, not originally planned:** the new
+`data/master_resumes/` library is fully gitignored, unlike the original
+single `master_resume.yaml`, which had been tracked in git since Phase 0
+("you want version history on resume changes"). That tradeoff made sense
+when there was only ever one person's data, already flagged for future
+redaction before any public push. It stops making sense the moment a
+second real person's data can end up in the same directory -- the
+original owner doesn't get to decide someone else's PII goes into a
+project's git history. The new backup mechanism (already built the
+previous session) gives local point-in-time recovery without that
+tradeoff.
+
+**Verification, in the same order as every feature before it:** file
+migration first (Divij's committed resume and the uncommitted Harshpreet
+data split into two named library entries, confirmed byte-for-byte via a
+direct diff before either was touched further), then a DB migration on
+the real, populated database (non-destructive `ALTER TABLE`, backfilling
+the two existing real applications with `"Main Resume"` since that was
+the only resume that existed when they were logged), then endpoint-level
+checks, and finally one real pipeline run through the actual `/api/jobs`
+endpoint against the second resume -- confirmed both the database row
+and the rendered output filename reflected the right person, not a
+silent fallback to the default. Cleaned up the test application and its
+output files afterward; the two real applications and the real resume
+data were never at risk throughout.
+
+---
+
 *(more entries added as this project continues)*

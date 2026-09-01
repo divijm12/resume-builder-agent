@@ -59,6 +59,7 @@ def log_application(
     tailor_result: dict,
     mode: str = "aggressive",
     cover_letter_path: Optional[Path] = None,
+    resume_name: Optional[str] = None,
 ) -> int:
     """Insert one applications row + one resume_versions row. Called once per
     apply.py run, immediately after rendering -- never after sending, since
@@ -68,18 +69,21 @@ def log_application(
     resume, diff_summary, unaddressed_*, ats_scan_notes, score_before/after)
     so a review UI can show gaps/diffs without re-deriving anything.
     cover_letter_path stays NULL unless a cover letter was generated this
-    run (opt-in, see run_pipeline's generate_cover_letter param)."""
+    run (opt-in, see run_pipeline's generate_cover_letter param).
+    resume_name is a human-readable label (e.g. "Main Resume"), not a file
+    path -- stored as a plain string snapshot so it stays meaningful even
+    if that named resume is later edited or deleted from the library."""
     conn = sqlite3.connect(str(db_path))
     try:
         cur = conn.execute(
             """
             INSERT INTO applications
-                (company, role_title, jd_raw, jd_parsed_json, match_score, resume_variant_path, cover_letter_path, tailor_result_json, mode)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (company, role_title, jd_raw, jd_parsed_json, match_score, resume_variant_path, cover_letter_path, tailor_result_json, mode, resume_name)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 company, role_title, jd_raw, json.dumps(jd_parsed), match_score, str(docx_path),
-                str(cover_letter_path) if cover_letter_path else None, json.dumps(tailor_result), mode,
+                str(cover_letter_path) if cover_letter_path else None, json.dumps(tailor_result), mode, resume_name,
             ),
         )
         application_id = cur.lastrowid
@@ -106,7 +110,8 @@ def run_pipeline(
     generate_cover_letter_flag: bool = False,
     outputs_dir: Path = Path("outputs"),
     db_path: Path = Path("data/applications.db"),
-    resume_path: Path = Path("data/master_resume.yaml"),
+    resume_path: Path = Path("data/master_resumes/main.yaml"),
+    resume_name: Optional[str] = None,
     progress_callback: Optional[Callable[[str], None]] = None,
 ) -> dict:
     """progress_callback, if given, is called with a stage name
@@ -127,12 +132,20 @@ def run_pipeline(
     -- see tailor.py's tailor_resume docstring.
 
     generate_cover_letter_flag: opt-in, off by default -- adds one more
-    paid API call, so it's a deliberate choice per run, not automatic."""
+    paid API call, so it's a deliberate choice per run, not automatic.
+
+    resume_name: human-readable label for whichever resume resume_path
+    points at (e.g. "Main Resume") -- logged on the application row so
+    it's never ambiguous which resume produced it, even once multiple
+    resumes exist in the library. Defaults to the file's own stem if not
+    given (CLI usage without --resume-name still gets something sensible
+    rather than a blank)."""
 
     def report(stage: str):
         if progress_callback:
             progress_callback(stage)
 
+    resume_name = resume_name or resume_path.stem
     master_resume = yaml.safe_load(resume_path.read_text())
 
     report("ingesting")
@@ -194,6 +207,7 @@ def run_pipeline(
         tailor_result=tailored,
         mode=mode,
         cover_letter_path=cover_letter_docx_path,
+        resume_name=resume_name,
     )
 
     return {
@@ -234,7 +248,11 @@ def main():
     )
     parser.add_argument("--outputs-dir", type=Path, default=Path("outputs"))
     parser.add_argument("--db", type=Path, default=Path("data/applications.db"))
-    parser.add_argument("--resume", type=Path, default=Path("data/master_resume.yaml"))
+    parser.add_argument("--resume", type=Path, default=Path("data/master_resumes/main.yaml"))
+    parser.add_argument(
+        "--resume-name", default=None,
+        help="Human-readable label for --resume, logged on the application row (default: the file's own stem)",
+    )
     args = parser.parse_args()
 
     jd_text = args.jd_file.read_text() if args.jd_file else args.jd_text
@@ -249,6 +267,7 @@ def main():
         outputs_dir=args.outputs_dir,
         db_path=args.db,
         resume_path=args.resume,
+        resume_name=args.resume_name,
     )
     print(json.dumps(result, indent=2))
 

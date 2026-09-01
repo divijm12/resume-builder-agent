@@ -16,6 +16,7 @@ Run from this directory: `uvicorn main:app --reload --port 8000`
 
 import io
 import json
+import re
 import sqlite3
 import sys
 import threading
@@ -47,9 +48,31 @@ from pypdf import PdfReader
 
 DB_PATH = REPO_ROOT / "data" / "applications.db"
 OUTPUTS_DIR = REPO_ROOT / "outputs"
-RESUME_PATH = REPO_ROOT / "data" / "master_resume.yaml"
+MASTER_RESUMES_DIR = REPO_ROOT / "data" / "master_resumes"
+MASTER_RESUME_INDEX_PATH = MASTER_RESUMES_DIR / "_index.json"
 RESUME_BACKUPS_DIR = REPO_ROOT / "data" / "master_resume_backups"
 MAX_RESUME_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB -- generous for a resume, defensive against abuse
+DEFAULT_RESUME_SLUG = "main"
+
+
+def _slugify(text: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
+    return slug or "resume"
+
+
+def _load_resume_index() -> dict:
+    if not MASTER_RESUME_INDEX_PATH.exists():
+        return {}
+    return json.loads(MASTER_RESUME_INDEX_PATH.read_text())
+
+
+def _save_resume_index(index: dict) -> None:
+    MASTER_RESUMES_DIR.mkdir(parents=True, exist_ok=True)
+    MASTER_RESUME_INDEX_PATH.write_text(json.dumps(index, indent=2))
+
+
+def _resume_path(slug: str) -> Path:
+    return MASTER_RESUMES_DIR / f"{slug}.yaml"
 
 app = FastAPI(title="Resume Pipeline Review API")
 app.add_middleware(
@@ -81,17 +104,20 @@ class CreateJobRequest(BaseModel):
     tailor_model: Optional[str] = None
     mode: Optional[str] = None
     generate_cover_letter: Optional[bool] = None
+    resume_slug: Optional[str] = None
 
 
 def _run_job(
     job_id: str, jd_text: str, company: Optional[str], role: Optional[str],
-    tailor_model: str, mode: str, generate_cover_letter_flag: bool,
+    tailor_model: str, mode: str, generate_cover_letter_flag: bool, resume_slug: str,
 ):
     def report(stage: str):
         with JOBS_LOCK:
             JOBS[job_id]["stage"] = stage
 
     try:
+        index = _load_resume_index()
+        resume_label = index.get(resume_slug, {}).get("label", resume_slug)
         result = apply.run_pipeline(
             jd_text,
             company_override=company,
@@ -101,7 +127,8 @@ def _run_job(
             generate_cover_letter_flag=generate_cover_letter_flag,
             outputs_dir=OUTPUTS_DIR,
             db_path=DB_PATH,
-            resume_path=RESUME_PATH,
+            resume_path=_resume_path(resume_slug),
+            resume_name=resume_label,
             progress_callback=report,
         )
         with JOBS_LOCK:
@@ -121,7 +148,7 @@ def create_job(body: CreateJobRequest, background_tasks: BackgroundTasks):
     background_tasks.add_task(
         _run_job, job_id, body.jd_text, body.company, body.role,
         body.tailor_model or apply.DEFAULT_MODEL, body.mode or "aggressive",
-        bool(body.generate_cover_letter),
+        bool(body.generate_cover_letter), body.resume_slug or DEFAULT_RESUME_SLUG,
     )
     return {"job_id": job_id}
 
@@ -144,7 +171,7 @@ def list_applications():
     conn = _get_db()
     try:
         rows = conn.execute(
-            "SELECT id, created_at, company, role_title, match_score, status, mode "
+            "SELECT id, created_at, company, role_title, match_score, status, mode, resume_name "
             "FROM applications ORDER BY created_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
@@ -429,37 +456,51 @@ def get_application_file(app_id: int, type: str = "pdf"):
 
 
 # ---------------------------------------------------------------------------
-# Master resume onboarding -- upload -> parse -> human-reviewed draft ->
-# confirm. Always available (not a one-time setup step), since the master
-# resume is meant to be updated over time, not just created once. Never
-# writes data/master_resume.yaml directly from an upload -- only /confirm
-# does that, and only after a human has seen the parsed draft.
+# Master resume library -- upload -> parse -> human-reviewed draft ->
+# confirm, as one NAMED entry among possibly several. Always available
+# (not a one-time setup step), since resumes are meant to be added/updated
+# over time, not just created once. Never writes a resume file directly
+# from an upload -- only /confirm does that, and only after a human has
+# seen the parsed draft. Applications record which named resume produced
+# them (apply.py's resume_name column) so a library with several resumes
+# never leaves it ambiguous which one scored/tailored a given application.
 # ---------------------------------------------------------------------------
 
 
-@app.get("/api/master-resume")
-def get_master_resume_summary():
-    """Light stats on the current master resume, so the upload page can
-    show "you currently have X" before someone replaces it. Not an error
-    if none exists yet -- that's the normal state on a fresh clone."""
-    if not RESUME_PATH.exists():
-        return {"exists": False}
-    resume = yaml.safe_load(RESUME_PATH.read_text()) or {}
-    return {
-        "exists": True,
-        "name": (resume.get("basics") or {}).get("name"),
-        "experience_count": len(resume.get("experience") or []),
-        "project_count": len(resume.get("projects") or []),
-        "skill_count": len(resume.get("skills") or []),
-    }
+@app.get("/api/master-resumes")
+def list_master_resumes():
+    """Every resume currently in the library, with light stats -- so the
+    New Application page can offer a real choice and the Resume page can
+    show what exists before someone adds or replaces one. Empty list (not
+    an error) on a fresh clone with nothing uploaded yet."""
+    index = _load_resume_index()
+    entries = []
+    for slug, meta in index.items():
+        path = _resume_path(slug)
+        if not path.exists():
+            continue  # index entry outlived its file somehow -- skip, don't crash
+        resume = yaml.safe_load(path.read_text()) or {}
+        entries.append(
+            {
+                "slug": slug,
+                "label": meta.get("label", slug),
+                "name": (resume.get("basics") or {}).get("name"),
+                "experience_count": len(resume.get("experience") or []),
+                "project_count": len(resume.get("projects") or []),
+                "skill_count": len(resume.get("skills") or []),
+                "updated_at": meta.get("updated_at"),
+            }
+        )
+    entries.sort(key=lambda e: e["updated_at"] or "", reverse=True)
+    return entries
 
 
-@app.post("/api/master-resume/parse")
+@app.post("/api/master-resumes/parse")
 async def parse_master_resume(file: UploadFile = File(...), model: str = "claude-sonnet-5"):
     """Extract text from an uploaded resume (.pdf or .docx) and parse it
-    into a draft master_resume.yaml -- never writes anything. The caller
-    must review the returned draft (and its validation_log) and POST to
-    /confirm to actually save it."""
+    into a draft -- never writes anything. The caller must review the
+    returned draft (and its validation_log) and POST to /confirm, with a
+    chosen name, to actually save it into the library."""
     filename = (file.filename or "").lower()
     if not (filename.endswith(".pdf") or filename.endswith(".docx")):
         raise HTTPException(400, "Only .pdf or .docx files are supported")
@@ -486,19 +527,26 @@ async def parse_master_resume(file: UploadFile = File(...), model: str = "claude
         "draft_yaml": yaml.dump(result["draft"], sort_keys=False),
         "validation_log": result["validation_log"],
         "raw_text": raw_text,
+        "suggested_label": result["draft"].get("basics", {}).get("name") or "",
     }
 
 
 class ConfirmMasterResumeRequest(BaseModel):
+    label: str
     yaml_text: str
 
 
-@app.post("/api/master-resume/confirm")
+@app.post("/api/master-resumes/confirm")
 def confirm_master_resume(body: ConfirmMasterResumeRequest):
-    """Write the (possibly hand-edited) reviewed draft as the real
-    master_resume.yaml. Backs up whatever was there before, if anything --
-    a bad upload should never be able to destroy the current file with no
-    way back."""
+    """Write the (possibly hand-edited) reviewed draft into the library
+    under `label`. Same label as an existing entry -> treated as a refresh
+    of that resume (backs up its previous content first, same safety net
+    as before); a new label -> adds a new entry alongside the others.
+    Never destroys another named resume."""
+    label = body.label.strip()
+    if not label:
+        raise HTTPException(400, "A name is required for this resume")
+
     try:
         parsed = yaml.safe_load(body.yaml_text)
     except yaml.YAMLError as e:
@@ -507,13 +555,50 @@ def confirm_master_resume(body: ConfirmMasterResumeRequest):
     if not isinstance(parsed, dict) or not all(k in parsed for k in ("basics", "skills", "experience")):
         raise HTTPException(400, "Missing required top-level keys: basics, skills, experience")
 
-    if RESUME_PATH.exists():
+    slug = _slugify(label)
+    path = _resume_path(slug)
+
+    if path.exists():
         RESUME_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = RESUME_BACKUPS_DIR / f"master_resume_{timestamp}.yaml"
-        backup_path.write_text(RESUME_PATH.read_text())
+        backup_path = RESUME_BACKUPS_DIR / f"{slug}_{timestamp}.yaml"
+        backup_path.write_text(path.read_text())
 
-    RESUME_PATH.write_text(body.yaml_text)
+    MASTER_RESUMES_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(body.yaml_text)
+
+    index = _load_resume_index()
+    index[slug] = {"label": label, "updated_at": datetime.now().isoformat()}
+    _save_resume_index(index)
+
+    return {"ok": True, "slug": slug}
+
+
+@app.delete("/api/master-resumes/{slug}")
+def delete_master_resume(slug: str):
+    """Removes a named resume from the library. Backs it up first (same
+    mechanism as an overwrite) rather than a bare delete -- recoverable by
+    hand if this turns out to be a mistake. Applications that already used
+    this resume keep their own resume_name string regardless (a plain
+    snapshot, not a reference to the file), so deleting doesn't corrupt
+    any historical record. Refuses to delete the last resume in the
+    library -- the dashboard should never be left with zero to choose from."""
+    index = _load_resume_index()
+    if slug not in index:
+        raise HTTPException(404, "no such resume")
+    if len(index) <= 1:
+        raise HTTPException(400, "Can't delete the only resume in the library")
+
+    path = _resume_path(slug)
+    if path.exists():
+        RESUME_BACKUPS_DIR.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = RESUME_BACKUPS_DIR / f"{slug}_{timestamp}_deleted.yaml"
+        backup_path.write_text(path.read_text())
+        path.unlink()
+
+    del index[slug]
+    _save_resume_index(index)
     return {"ok": True}
 
 

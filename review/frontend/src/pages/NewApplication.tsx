@@ -1,6 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { createJob, listApplications, TAILORING_MODES, type ApplicationSummary } from "../api";
+import {
+  createJob,
+  listApplications,
+  listMasterResumes,
+  TAILORING_MODES,
+  type ApplicationSummary,
+  type MasterResumeEntry,
+} from "../api";
 import { useJobPolling } from "../hooks/useJobPolling";
 
 const STAGE_LABELS: Record<string, string> = {
@@ -102,6 +109,8 @@ export default function NewApplication() {
   const [jobId, setJobId] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [applications, setApplications] = useState<ApplicationSummary[] | null>(null);
+  const [resumes, setResumes] = useState<MasterResumeEntry[] | null>(null);
+  const [resumeSlug, setResumeSlug] = useState<string>("");
 
   const job = useJobPolling(jobId);
 
@@ -109,6 +118,15 @@ export default function NewApplication() {
     listApplications()
       .then(setApplications)
       .catch(() => setApplications([]));
+  }, []);
+
+  useEffect(() => {
+    listMasterResumes()
+      .then((list) => {
+        setResumes(list);
+        if (list.length > 0) setResumeSlug(list[0].slug);
+      })
+      .catch(() => setResumes([]));
   }, []);
 
   useEffect(() => {
@@ -149,6 +167,7 @@ export default function NewApplication() {
         tailor_model: tailorModel,
         mode,
         generate_cover_letter: wantCoverLetter,
+        resume_slug: resumeSlug || undefined,
       });
       setJobId(job_id);
     } catch (err) {
@@ -254,6 +273,36 @@ export default function NewApplication() {
                 </button>
               );
             })}
+
+            <div className="rounded-lg border border-[#232b3a] bg-[#0c0f16] p-4">
+              <div className="mb-1 text-[10px] uppercase tracking-wide text-[#4a5468]">Resume</div>
+              {resumes && resumes.length === 0 ? (
+                <div className="text-sm text-[#f2c94c]">
+                  No resumes in your library yet — upload one on the Resume page first.
+                </div>
+              ) : (
+                <div className="relative">
+                  <select
+                    value={resumeSlug}
+                    onChange={(e) => setResumeSlug(e.target.value)}
+                    disabled={submitting}
+                    className="w-full appearance-none bg-transparent font-mono text-sm text-[#e4e8f0] focus:outline-none disabled:opacity-60"
+                  >
+                    {(resumes ?? []).map((r) => (
+                      <option key={r.slug} value={r.slug} className="bg-[#10141d]">
+                        {r.label} ({r.name})
+                      </option>
+                    ))}
+                  </select>
+                  <div className="pointer-events-none absolute right-0 top-1">
+                    <ChevronDown />
+                  </div>
+                </div>
+              )}
+              <div className="mt-2 text-[10px] leading-relaxed text-[#4a5468]">
+                Which resume in your library to score and tailor for this application.
+              </div>
+            </div>
 
             <div className="rounded-lg border border-[#232b3a] bg-[#0c0f16] p-4">
               <div className="mb-1 text-[10px] uppercase tracking-wide text-[#4a5468]">Tailoring model</div>

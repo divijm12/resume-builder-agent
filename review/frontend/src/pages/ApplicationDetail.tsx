@@ -381,8 +381,15 @@ export default function ApplicationDetail() {
         <div>
           <h1 className="text-xl font-semibold">{app.company}</h1>
           <p className="text-[#9db3c9]">{app.role_title}</p>
-          <span className="mt-2 inline-block rounded-full border border-[#232b3a] bg-[#0c0f16] px-2.5 py-0.5 text-xs capitalize text-[#6b7690]">
-            {app.mode} mode
+          <span className="mt-2 inline-flex items-center gap-2">
+            <span className="rounded-full border border-[#232b3a] bg-[#0c0f16] px-2.5 py-0.5 text-xs capitalize text-[#6b7690]">
+              {app.mode} mode
+            </span>
+            {app.resume_name && (
+              <span className="rounded-full border border-[#232b3a] bg-[#0c0f16] px-2.5 py-0.5 text-xs text-[#6b7690]">
+                Resume: {app.resume_name}
+              </span>
+            )}
           </span>
         </div>
         <select

@@ -20,6 +20,7 @@ export interface ApplicationSummary {
   match_score: number | null;
   status: string;
   mode: "honest" | "aggressive";
+  resume_name: string | null;
 }
 
 export interface ScoreResult {
@@ -169,6 +170,9 @@ export function createJob(params: {
   mode?: string;
   /** Off by default -- adds one more paid API call. */
   generate_cover_letter?: boolean;
+  /** Which named resume (from the library) to score/tailor against.
+   * Omitting it falls back to "main" server-side. */
+  resume_slug?: string;
 }): Promise<{ job_id: string }> {
   return request("/api/jobs", { method: "POST", body: JSON.stringify(params) });
 }
@@ -234,22 +238,31 @@ export function fileUrl(id: number, type: "pdf" | "docx" | "cover_letter_pdf" | 
   return `${API_BASE}/api/applications/${id}/file?type=${type}`;
 }
 
-export interface MasterResumeSummary {
-  exists: boolean;
-  name?: string;
-  experience_count?: number;
-  project_count?: number;
-  skill_count?: number;
+/** One named resume in the library -- multiple can coexist, each usable
+ * for a different application. */
+export interface MasterResumeEntry {
+  slug: string;
+  label: string;
+  name: string | null;
+  experience_count: number;
+  project_count: number;
+  skill_count: number;
+  updated_at: string | null;
 }
 
-export function getMasterResumeSummary(): Promise<MasterResumeSummary> {
-  return request(`/api/master-resume`);
+export function listMasterResumes(): Promise<MasterResumeEntry[]> {
+  return request(`/api/master-resumes`);
 }
 
 export interface ParsedResumeResult {
   draft_yaml: string;
   validation_log: string[];
   raw_text: string;
+  /** The parsed draft's own basics.name, offered as a starting point for
+   * the "what do you want to call this resume" field -- still editable,
+   * since the label is a library entry name, not necessarily the same
+   * thing as whoever the resume belongs to. */
+  suggested_label: string;
 }
 
 /** Uses a raw fetch, not the shared `request()` helper -- a multipart file
@@ -258,7 +271,7 @@ export interface ParsedResumeResult {
 export async function uploadMasterResume(file: File, model: string): Promise<ParsedResumeResult> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE}/api/master-resume/parse?model=${encodeURIComponent(model)}`, {
+  const res = await fetch(`${API_BASE}/api/master-resumes/parse?model=${encodeURIComponent(model)}`, {
     method: "POST",
     body: formData,
   });
@@ -269,9 +282,15 @@ export async function uploadMasterResume(file: File, model: string): Promise<Par
   return res.json();
 }
 
-export function confirmMasterResume(yamlText: string): Promise<{ ok: boolean }> {
-  return request(`/api/master-resume/confirm`, {
+/** Same label as an existing library entry -> refreshes that resume
+ * (backed up first); a new label -> adds a new entry alongside the rest. */
+export function confirmMasterResume(label: string, yamlText: string): Promise<{ ok: boolean; slug: string }> {
+  return request(`/api/master-resumes/confirm`, {
     method: "POST",
-    body: JSON.stringify({ yaml_text: yamlText }),
+    body: JSON.stringify({ label, yaml_text: yamlText }),
   });
+}
+
+export function deleteMasterResume(slug: string): Promise<{ ok: boolean }> {
+  return request(`/api/master-resumes/${slug}`, { method: "DELETE" });
 }

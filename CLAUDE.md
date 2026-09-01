@@ -10,11 +10,15 @@ A personal job-application pipeline: paste a JD → score against my resume → 
 ```
 apply.py                   # orchestrator: ingest -> score -> tailor -> render -> log
 data/
-  master_resume.yaml       # source of truth, structured, tagged bullets -- replace it any time
-                            # via the dashboard's "Resume" page (upload -> review -> confirm),
-                            # never hand it a raw upload without reviewing the draft first
-  master_resume_backups/   # gitignored -- one timestamped backup made automatically each time
-                            # the dashboard overwrites master_resume.yaml
+  master_resumes/          # gitignored (contains real PII, possibly of more than one person)
+                            # -- a NAMED LIBRARY of resumes, not a single file. <slug>.yaml per
+                            # resume + _index.json (slug -> {label, updated_at}). Add/refresh one
+                            # any time via the dashboard's "Resume" page (upload -> review ->
+                            # confirm) -- never hand it a raw upload without reviewing the draft
+                            # first. Each application logs which named resume it used
+                            # (applications.resume_name), so it's never ambiguous later.
+  master_resume_backups/   # gitignored -- one timestamped backup made automatically before any
+                            # overwrite or delete in the library above
   schema.sql                # versioned applications.db schema (the .db itself is gitignored)
   applications.db          # SQLite — one row per application
 agents/
@@ -58,8 +62,8 @@ outputs/
 - When in doubt about a scope decision, default to the more conservative/manual option and ask rather than automating further.
 
 ## Commands
-- `python agents/parse_resume.py --file path/to/resume.txt [--model claude-sonnet-5|claude-haiku-4-5]` — Stage -1 alone (raw text in, draft JSON out, never writes anything). The dashboard's "Resume" page wraps this with file upload (.pdf/.docx) + a review-and-edit step before anything gets saved to `data/master_resume.yaml` — always available, not just a first-run step.
-- `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values, `--mode honest|aggressive` to control tailoring intensity (default `aggressive`; see ARCHITECTURE.md Stage 2 — neither mode fabricates), `--tailor-model <model>` to pick the model for tailoring only (ingest/scoring always use their own fast default — see ARCHITECTURE.md Stage 7), `--cover-letter` to also generate a cover letter (off by default — one more paid API call).
+- `python agents/parse_resume.py --file path/to/resume.txt [--model claude-sonnet-5|claude-haiku-4-5]` — Stage -1 alone (raw text in, draft JSON out, never writes anything). The dashboard's "Resume" page wraps this with file upload (.pdf/.docx) + a naming/review-and-edit step before anything gets saved into `data/master_resumes/<slug>.yaml` — always available (add or refresh a resume any time), not just a first-run step.
+- `python apply.py --jd-file path/to/jd.txt` — run the full pipeline (ingest → score → tailor → render) and log it to `applications.db`. Add `--company`/`--role` to override auto-extracted values, `--mode honest|aggressive` to control tailoring intensity (default `aggressive`; see ARCHITECTURE.md Stage 2 — neither mode fabricates), `--tailor-model <model>` to pick the model for tailoring only (ingest/scoring always use their own fast default — see ARCHITECTURE.md Stage 7), `--cover-letter` to also generate a cover letter (off by default — one more paid API call), `--resume path/to/master_resumes/<slug>.yaml` to pick which library entry to use (default `data/master_resumes/main.yaml`), `--resume-name "Label"` to log a human-readable name on the application row (defaults to the file's own stem).
 - `python agents/ingest_jd.py --file path/to/jd.txt` — Stage 0 alone
 - `python agents/score.py --jd-json path/to/jd_parsed.json` — Stage 1 alone
 - `python agents/tailor.py --jd-json ... --score-json ... [--mode honest|aggressive]` — Stage 2 alone

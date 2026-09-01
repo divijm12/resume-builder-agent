@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import {
   confirmMasterResume,
-  getMasterResumeSummary,
+  deleteMasterResume,
+  listMasterResumes,
   uploadMasterResume,
-  type MasterResumeSummary,
+  type MasterResumeEntry,
   type ParsedResumeResult,
 } from "../api";
 
@@ -13,23 +14,30 @@ const MODELS = [
 ];
 
 export default function MasterResume() {
-  const [summary, setSummary] = useState<MasterResumeSummary | null>(null);
-  const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [resumes, setResumes] = useState<MasterResumeEntry[] | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
+  const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
+
   const [file, setFile] = useState<File | null>(null);
   const [model, setModel] = useState(MODELS[1].value);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [result, setResult] = useState<ParsedResumeResult | null>(null);
+  const [label, setLabel] = useState("");
   const [editedYaml, setEditedYaml] = useState("");
   const [showRawText, setShowRawText] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
+  function refreshList() {
+    return listMasterResumes()
+      .then(setResumes)
+      .catch((err) => setListError(err instanceof Error ? err.message : "Failed to load"));
+  }
+
   useEffect(() => {
-    getMasterResumeSummary()
-      .then(setSummary)
-      .catch((err) => setSummaryError(err instanceof Error ? err.message : "Failed to load"));
+    refreshList();
   }, []);
 
   async function handleUpload() {
@@ -40,6 +48,7 @@ export default function MasterResume() {
     try {
       const res = await uploadMasterResume(file, model);
       setResult(res);
+      setLabel(res.suggested_label);
       setEditedYaml(res.draft_yaml);
     } catch (err) {
       setUploadError(err instanceof Error ? err.message : "Failed to parse resume");
@@ -49,13 +58,13 @@ export default function MasterResume() {
   }
 
   async function handleSave() {
+    if (!label.trim()) return;
     setSaving(true);
     setSaveError(null);
     try {
-      await confirmMasterResume(editedYaml);
+      await confirmMasterResume(label.trim(), editedYaml);
       setSaved(true);
-      const refreshed = await getMasterResumeSummary();
-      setSummary(refreshed);
+      await refreshList();
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -63,23 +72,56 @@ export default function MasterResume() {
     }
   }
 
+  async function handleDelete(slug: string) {
+    setDeletingSlug(slug);
+    try {
+      await deleteMasterResume(slug);
+      await refreshList();
+    } catch (err) {
+      setListError(err instanceof Error ? err.message : "Failed to delete");
+    } finally {
+      setDeletingSlug(null);
+    }
+  }
+
+  const existingLabels = (resumes ?? []).map((r) => r.label);
+
   return (
     <div>
-      <h1 className="mb-1 text-xl font-semibold text-[#e4e8f0]">Master resume</h1>
+      <h1 className="mb-1 text-xl font-semibold text-[#e4e8f0]">Master resumes</h1>
       <p className="mb-6 text-sm text-[#6b7690]">
-        The one structured source of truth every tailored resume, cover letter, and outreach draft is built from.
-        Upload a resume any time to replace it — nothing is saved until you review the parsed draft and confirm.
+        Every application is scored and tailored against one of these. Upload as many as you want — a different
+        resume for a different kind of role — and pick which one to use when you start a new application.
       </p>
 
       <div className="mb-6 rounded-lg border border-[#1c2431] bg-[#10141d] px-5 py-4">
-        <div className="text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">Currently using</div>
-        {summaryError && <p className="mt-1 text-sm text-[#f87171]">{summaryError}</p>}
-        {summary && !summary.exists && <p className="mt-1 text-sm text-[#6b7690]">No master resume yet.</p>}
-        {summary && summary.exists && (
-          <p className="mt-1 text-sm text-[#e4e8f0]">
-            {summary.name} — {summary.experience_count} experience entries, {summary.project_count} projects,{" "}
-            {summary.skill_count} skills
-          </p>
+        <div className="mb-2 text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">In your library</div>
+        {listError && <p className="text-sm text-[#f87171]">{listError}</p>}
+        {resumes && resumes.length === 0 && <p className="text-sm text-[#6b7690]">No resumes yet — upload one below.</p>}
+        {resumes && resumes.length > 0 && (
+          <ul className="space-y-2">
+            {resumes.map((r) => (
+              <li
+                key={r.slug}
+                className="flex items-center justify-between rounded-md border border-[#1c2431] bg-[#0c0f16] px-4 py-2.5"
+              >
+                <div>
+                  <span className="text-sm font-medium text-[#e4e8f0]">{r.label}</span>
+                  <span className="ml-2 text-xs text-[#6b7690]">
+                    {r.name} — {r.experience_count} experience, {r.project_count} projects, {r.skill_count} skills
+                  </span>
+                </div>
+                <button
+                  onClick={() => handleDelete(r.slug)}
+                  disabled={deletingSlug === r.slug || resumes.length <= 1}
+                  title={resumes.length <= 1 ? "Can't delete the only resume in the library" : "Delete"}
+                  className="rounded-md border border-[#232b3a] px-2.5 py-1 text-xs font-medium text-[#f87171] hover:border-[#f87171] disabled:opacity-40"
+                >
+                  {deletingSlug === r.slug ? "Deleting…" : "Delete"}
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
@@ -143,6 +185,28 @@ export default function MasterResume() {
 
           <div>
             <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">
+              Name this resume
+            </div>
+            <input
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              list="existing-resume-labels"
+              placeholder='e.g. "Main Resume", "Data-focused"'
+              className="w-full rounded-md border border-[#232b3a] bg-transparent px-3 py-2 text-sm text-[#e4e8f0] placeholder:text-[#4a5468] focus:border-[#4fd6f0] focus:outline-none"
+            />
+            <datalist id="existing-resume-labels">
+              {existingLabels.map((l) => (
+                <option key={l} value={l} />
+              ))}
+            </datalist>
+            <p className="mt-1 text-[11px] text-[#4a5468]">
+              Reusing an existing name replaces that resume (a backup is kept automatically); any other name adds a
+              new one alongside it.
+            </p>
+          </div>
+
+          <div>
+            <div className="mb-1 text-[10px] font-medium uppercase tracking-wide text-[#4a5468]">
               Review and edit the draft before saving
             </div>
             <textarea
@@ -154,13 +218,13 @@ export default function MasterResume() {
           </div>
 
           {saveError && <p className="text-sm text-[#f87171]">{saveError}</p>}
-          {saved && <p className="text-sm text-[#4ade80]">Saved as your master resume.</p>}
+          {saved && <p className="text-sm text-[#4ade80]">Saved to your resume library.</p>}
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || !label.trim()}
             className="rounded-md border border-[#4fd6f0] px-4 py-2 text-sm font-medium text-[#4fd6f0] hover:bg-[#4fd6f0] hover:text-[#0c0f16] disabled:opacity-60"
           >
-            {saving ? "Saving…" : "Save as my master resume"}
+            {saving ? "Saving…" : "Save to library"}
           </button>
         </div>
       )}
