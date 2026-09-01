@@ -1,3 +1,4 @@
+// Shared shell (header + nav) rendered around every page via <Outlet />.
 import { NavLink, Outlet } from "react-router-dom";
 
 export default function App() {

@@ -1,3 +1,6 @@
+// Entry point: mounts the app and defines the four routes. All state lives
+// in each page component (no global store) -- the app is small enough that
+// prop-drilling/local state is simpler than adding one.
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Route, Routes } from "react-router-dom";

@@ -1,3 +1,7 @@
+// "/applications/:id": everything for one application after the pipeline
+// has run -- preview/download the resume + cover letter, find a hiring
+// contact, draft and send outreach, and inspect the score/diff/validation
+// log. This is where every post-generation, human-in-the-loop action lives.
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {

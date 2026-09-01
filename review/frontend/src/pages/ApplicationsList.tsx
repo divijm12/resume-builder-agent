@@ -1,3 +1,5 @@
+// Home page ("/"): every logged application in one table, read-only --
+// all the actual pipeline/review actions live on ApplicationDetail.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { listApplications, type ApplicationSummary } from "../api";

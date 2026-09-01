@@ -1,5 +1,7 @@
 # Job Application Agent System — Architecture
 
+**Contents:** [1. Philosophy](#1-philosophy) · [2. Data model](#2-data-model-source-of-truth) · [3. Pipeline stages](#3-pipeline-stages-agents) ([-1](#stage--1--master-resume-onboarding) · [0](#stage-0--jd-ingest) · [1](#stage-1--scoring) · [2](#stage-2--tailoring) · [3](#stage-3--render) · [4](#stage-4--cover-letter) · [5](#stage-5--contact-discovery) · [6](#stage-6--outreach-draft) · [7](#stage-7--review-queue-human-checkpoint)) · [4. Tech stack](#4-tech-stack) · [5. Guardrails](#5-guardrails-non-negotiable) · [6. Testing](#6-testing)
+
 ## 1. Philosophy
 
 This is a **pipeline of specialized agents with human checkpoints**, not one big autonomous agent. Every stage has a strict input/output contract (structured JSON in, structured JSON out) so it can be tested, re-run, and debugged in isolation. Sending anything (email, application) always requires a manual confirmation step.
@@ -10,7 +12,8 @@ Core principle: **the resume is data, not a document.** Everything downstream �
 
 ## 2. Data model (source of truth)
 
-### `data/master_resume.yaml`
+### `data/master_resumes/<slug>.yaml`
+One resume in the library (see Stage -1 below) — every entry shares this shape:
 ```yaml
 basics:
   name: ""
@@ -441,8 +444,8 @@ Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refer
 - **State:** SQLite (`applications.db`) — simple, local, queryable
 - **Resume source of truth:** YAML
 - **Orchestration:** standalone Python scripts in `agents/`, one per pipeline stage, each calling the Anthropic API directly (see CLAUDE.md) — not Claude Code skills
-- **Email verification/finding:** Hunter.io or Apollo.io API (free tier is enough at your volume)
-- **Sending:** Gmail API, OAuth, draft-then-confirm — never blind SMTP send
+- **Email verification/finding:** Hunter.io API only — Apollo.io was considered but its free plan has no API access at all (see Stage 5)
+- **Sending:** Gmail SMTP + an App Password (see Stage 7), draft-then-confirm — never a blind/automatic send
 - **Rendering:** `python-docx` for `.docx`, `reportlab` for `.pdf` (independent renders, not a docx→pdf conversion — see Stage 3 notes)
 - **Review UI:** originally planned as a CLI, built instead as a full web app (2026-08-28) — FastAPI backend (`review/backend/`) + React/Vite/TypeScript/Tailwind frontend (`review/frontend/`), since the user wanted a real trigger-and-review interface, not a read-only list. See Stage 7.
 

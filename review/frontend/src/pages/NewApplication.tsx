@@ -1,3 +1,6 @@
+// "/new": paste a JD, pick a resume/mode/model, kick off POST /api/jobs, then
+// poll (useJobPolling) and show live stage progress until the pipeline lands
+// on a new application row -- at which point we navigate straight to it.
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {

@@ -1,3 +1,6 @@
+// "/master-resume": the resume library -- list what's saved, delete an
+// entry, and the upload -> parse -> human-reviewed draft -> confirm flow
+// that's the only way (besides hand-editing YAML) a resume enters the app.
 import { useEffect, useState } from "react";
 import {
   confirmMasterResume,
