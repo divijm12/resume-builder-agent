@@ -455,3 +455,35 @@ Not a pipeline stage — the "one layer up" that CLAUDE.md's working style refer
 3. Contact discovery only uses verified sources (API-verified emails or direct company pages) — no scraping LinkedIn profiles.
 4. Every generated resume/cover-letter version is saved and linked to the application row, so nothing is ever silently overwritten.
 5. Unverified contacts are visibly flagged as unverified in the review queue, never silently treated as equal to verified ones.
+
+---
+
+## 6. Testing
+
+`tests/` (root, run via `python -m pytest tests/`) is a permanent, mocked
+regression suite that exists specifically to protect the guardrails in
+section 5 above and the fabrication/attachment checks throughout section
+3 — every check that was previously verified once with a throwaway
+script and then discarded now has a real test alongside it instead.
+
+- **Fully mocked, zero cost.** Every `anthropic.Anthropic`/API call in
+  every test file is mocked (`unittest.mock`) — no network calls, no API
+  spend, no `.env` required. `conftest.py` at the repo root puts
+  `agents/` and `review/backend/` on `sys.path` so test files import
+  modules directly (`import tailor`, `import gmail_client`, etc.).
+- **Decoupled from real pipeline execution.** Tests never run
+  automatically as part of `apply.py` or the dashboard — only when a
+  developer runs `pytest` by hand after changing code, to check "did
+  this change break an existing guardrail." They never read or write
+  `data/applications.db`, `data/master_resumes/`, or `outputs/`; the
+  gmail test uses pytest's `tmp_path` fixture for any file it needs.
+- **One file per pipeline stage/module with a checkable rule**:
+  `test_tailor.py` (numeric fabrication, dropped/added tech term,
+  appended clause, honest-mode locking, and the distinctive-phrase
+  retry-before-revert mechanism from section 3's Stage 2), `test_cover_letter.py`,
+  `test_draft_outreach.py`, `test_find_contact.py`, `test_parse_resume.py`
+  (Stage -1's global numeric check), and `test_gmail_client.py` (the
+  missing-attachment-blocks-send guarantee).
+- **Convention:** when adding or changing a guardrail, add or update its
+  test in the same commit rather than only verifying it with a scratch
+  script and discarding the script — see `CLAUDE.md`'s Working style.

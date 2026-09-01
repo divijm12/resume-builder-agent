@@ -60,6 +60,7 @@ outputs/
 - When adding a new agent, write it as a pure function: JSON in, JSON out, no side effects (no DB writes, no file writes, no network calls beyond its one job). Orchestration/persistence happens one layer up.
 - Prefer small, inspectable diffs in tailored resumes over full regeneration — makes hallucination easy to spot in review.
 - When in doubt about a scope decision, default to the more conservative/manual option and ask rather than automating further.
+- Run `python -m pytest tests/` before considering a change to any guardrail-bearing agent done — it's fast, free, and mocked (see Commands below). Add a new test alongside any new guardrail rather than only verifying it ad hoc and discarding the script.
 
 ## Commands
 - `python agents/parse_resume.py --file path/to/resume.txt [--model claude-sonnet-5|claude-haiku-4-5]` — Stage -1 alone (raw text in, draft JSON out, never writes anything). The dashboard's "Resume" page wraps this with file upload (.pdf/.docx) + a naming/review-and-edit step before anything gets saved into `data/master_resumes/<slug>.yaml` — always available (add or refresh a resume any time), not just a first-run step.
@@ -74,3 +75,4 @@ outputs/
 - `python render/render.py --tailored-json ... --company ... --role ...` — Stage 3 alone
 - `cd review/backend && uvicorn main:app --reload --port 8000` — start the review API (needs `.env` at repo root). **`--reload` only watches `review/backend/` by default — it does NOT pick up edits to `agents/*.py`, `apply.py`, or `render/render.py`, since those live outside that directory.** After editing anything outside `review/backend/`, restart the uvicorn process manually (kill it and relaunch) — confirmed the hard way: a long-running server silently served pre-fix `tailor.py` code for an entire debugging session because of this. Don't assume a running dashboard reflects the latest agent/pipeline code without checking when the backend process was last started.
 - `cd review/frontend && npm run dev` — start the review web UI (http://localhost:5173), needs the backend running
+- `python -m pytest tests/` — run the regression suite for every guardrail (fabrication checks, verified-status mapping, the turfgrass-style distinctive-detail retry, attachment enforcement, etc.). Fully mocked — no API calls, no cost, runs in under a second. Run this after touching `agents/*.py` or `review/backend/gmail_client.py`, before trusting the change; it does NOT run automatically as part of a real pipeline execution and never touches real data.

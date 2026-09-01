@@ -1160,4 +1160,59 @@ synthetic examples to check against.
 
 ---
 
+## 23. Turning throwaway verification scripts into a permanent suite
+
+Every guardrail built so far in this project was verified the same way:
+write a small mocked script, run it, watch it pass, then let it sit
+unused (or delete it) once the real feature shipped. That discipline
+caught real bugs along the way -- including the majority-threshold bug
+in section 22, found by a script written specifically to calibrate the
+distinctive-phrase check before trusting it. But a script that gets
+thrown away only protects the moment it was written for. It doesn't
+protect the *next* change to that same code from silently breaking what
+it verified.
+
+The fix was mechanical, not clever: collect every one of those
+calibration scripts into `tests/`, put them under `pytest`, and add one
+`conftest.py` so they can all just `import tailor`, `import
+gmail_client`, etc. without repeating path setup. 52 tests, still fully
+mocked, still zero API cost, running in well under a second. Nothing
+about *what* gets checked changed -- the numeric-fabrication diff, the
+dropped-tech-term check, the appended-clause check, the
+distinctive-phrase retry mechanism, the missing-attachment-blocks-send
+guarantee, the verified-status mapping -- all of it already existed as
+one-off scripts. What changed is that it's now re-runnable, in one
+command, forever, instead of "trust that nothing broke it since I last
+happened to check by hand."
+
+**The one bug this consolidation itself caught**, in a scratch script
+for the appended-clause guardrail, was a test-construction mistake
+rather than a real regression: a test input appended an extra period
+before the malformed clause, but the function under test strips the
+*original* bullet's own trailing period before comparing -- so the test
+input's shape didn't match what the function actually expects to see.
+Small, but worth naming: writing a test is its own place to introduce a
+bug, and a test that "passes" without actually exercising the failure
+path it claims to check is worse than no test, because it looks like
+coverage. The fix was to build the malformed input the same way the
+function itself does (strip the trailing period first), not to
+guess at the shape.
+
+**The explanation that actually landed with the user took three tries**,
+which is worth recording because it's a real, general confusion, not a
+one-off: "calibration checks, mocked" as an abstract description wasn't
+enough; a literal input -> expected output -> pass/fail walkthrough got
+partway there; what finally closed the loop was the direct question
+"will it run every time the pipeline runs?" and the direct answer:
+no, never automatically, never touching real data -- a test suite is a
+separate thing a developer runs by hand after changing code, not a
+gate the real pipeline passes through. The three-try arc says something
+about explaining developer tooling to someone learning this alongside
+the project: the useful unit isn't "what a test checks," it's "when
+does it run, and what does it touch" -- the abstraction (calibration,
+mocking) is less load-bearing than the concrete boundary (this runs on
+your command, on your machine, and never on a real application).
+
+---
+
 *(more entries added as this project continues)*
